@@ -1,0 +1,109 @@
+version: "3.9"
+
+# Ambiente de DESARROLLO local
+# Levantar:  docker compose up --build
+# Apagar:    docker compose down
+# Apagar y borrar datos: docker compose down -v
+
+services:
+  mysql:
+    image: mariadb:11
+    container_name: agrosense-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: agrosense-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+    ports:
+      - "8081:80"
+    depends_on:
+      - mysql
+
+  auth-service:
+    build: ./services/auth-service
+    container_name: agrosense-auth
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3001:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./services/auth-service:/app
+      - /app/node_modules
+
+  fincas-service:
+    build: ./services/fincas-service
+    container_name: agrosense-fincas
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3002:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./services/fincas-service:/app
+      - /app/node_modules
+
+  lecturas-service:
+    build: ./services/lecturas-service
+    container_name: agrosense-lecturas
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3003:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./services/lecturas-service:/app
+      - /app/node_modules
+
+  etl-service:
+    build: ./services/etl-service
+    container_name: agrosense-etl
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./services/etl-service:/app
+
+  web-admin:
+    build: ./web-admin
+    container_name: agrosense-web
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:3000"
+    depends_on:
+      - auth-service
+      - fincas-service
+      - lecturas-service
+    volumes:
+      - ./web-admin:/app
+      - /app/node_modules
+
+volumes:
+  mysql_data:

@@ -1,0 +1,67 @@
+version: "3.9"
+
+# Ambiente de PRUEBAS local (aislado del de desarrollo: otros puertos, otra DB/volumen)
+# Pensado para correr pruebas de integración o que la Ingeniera revise sin tocar tu ambiente de trabajo diario.
+# Levantar:  docker compose -f docker-compose.test.yml up --build
+# Apagar:    docker compose -f docker-compose.test.yml down -v
+
+services:
+  mysql-test:
+    image: mariadb:11
+    container_name: agrosense-mysql-test
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}_test
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "3316:3306"
+    volumes:
+      - mysql_test_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  auth-service-test:
+    build: ./services/auth-service
+    env_file: .env.test
+    ports:
+      - "4001:3000"
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+
+  fincas-service-test:
+    build: ./services/fincas-service
+    env_file: .env.test
+    ports:
+      - "4002:3000"
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+
+  lecturas-service-test:
+    build: ./services/lecturas-service
+    env_file: .env.test
+    ports:
+      - "4003:3000"
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+
+  web-admin-test:
+    build: ./web-admin
+    env_file: .env.test
+    ports:
+      - "8090:3000"
+    depends_on:
+      - auth-service-test
+      - fincas-service-test
+      - lecturas-service-test
+
+volumes:
+  mysql_test_data:

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>AgroSense - Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <h1>AgroSense - Panel administrativo</h1>
+    <a href="/logout">Cerrar sesión</a>
+  </header>
+
+  <main>
+    <h2>Fincas registradas</h2>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Nombre</th><th>Ubicación</th></tr>
+      </thead>
+      <tbody>
+        <% fincas.forEach(f => { %>
+          <tr>
+            <td><%= f.id %></td>
+            <td><%= f.nombre %></td>
+            <td><%= f.ubicacion %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
