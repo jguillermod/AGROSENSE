@@ -10,17 +10,10 @@
     <main class="main-content">
       <div class="page-topbar">
         <div>
-          <h2>Configuración</h2>
-          <p class="page-subtitle">Datos de tu cuenta</p>
+          <h2>Configuración de la cuenta</h2>
+          <p class="page-subtitle">Administra tu información personal y acceso</p>
         </div>
       </div>
-
-      <% if (error) { %>
-        <p class="auth-message auth-message--error"><%= error %></p>
-      <% } %>
-      <% if (success) { %>
-        <p class="auth-message auth-message--success"><%= success %></p>
-      <% } %>
 
       <div class="data-table-wrap config-panel">
         <div class="config-row">
@@ -39,49 +32,89 @@
         </div>
       </div>
 
-      <h3 class="section-title">Editar perfil</h3>
-      <div class="data-table-wrap">
-        <form method="POST" action="/configuracion/perfil" enctype="multipart/form-data" class="profile-form" id="form-perfil">
-          <div class="profile-avatar-row">
-            <% if (perfil && perfil.foto_url) { %>
-              <img class="profile-avatar-preview" id="avatar-preview" src="<%= perfil.foto_url %>" alt="">
-            <% } else { %>
-              <i class="bi bi-person-circle profile-avatar-fallback" id="avatar-fallback"></i>
-              <img class="profile-avatar-preview" id="avatar-preview" src="" alt="" hidden>
-            <% } %>
-            <div>
-              <label class="btn-secondary profile-avatar-btn" for="foto">
-                <i class="bi bi-camera-fill"></i> Cambiar foto
-              </label>
-              <input type="file" name="foto" id="foto" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-              <p class="modal-hint">JPG, PNG, WEBP o GIF. Máximo 2 MB.</p>
+      <div class="config-sections">
+        <!-- Foto de perfil -->
+        <div class="config-card">
+          <h3 class="section-title">Foto de perfil</h3>
+          <% if (section === 'foto' && error) { %>
+            <p class="auth-message auth-message--error"><%= error %></p>
+          <% } %>
+          <% if (section === 'foto' && success) { %>
+            <p class="auth-message auth-message--success"><%= success %></p>
+          <% } %>
+          <form method="POST" action="/configuracion/foto" enctype="multipart/form-data" class="profile-form" id="form-foto">
+            <div class="profile-avatar-row">
+              <% if (perfil && perfil.foto_url) { %>
+                <img class="profile-avatar-preview" id="avatar-preview" src="<%= perfil.foto_url %>" alt="">
+              <% } else { %>
+                <i class="bi bi-person-circle profile-avatar-fallback" id="avatar-fallback"></i>
+                <img class="profile-avatar-preview" id="avatar-preview" src="" alt="" hidden>
+              <% } %>
+              <div>
+                <label class="btn-secondary profile-avatar-btn" for="foto">
+                  <i class="bi bi-camera-fill"></i> Elegir foto
+                </label>
+                <input type="file" name="foto" id="foto" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                <p class="modal-hint">JPG, PNG, WEBP o GIF. Máximo 2 MB.</p>
+              </div>
             </div>
-          </div>
+            <div class="modal-actions modal-actions--start">
+              <button type="submit" class="btn-primary">Guardar foto</button>
+            </div>
+          </form>
+        </div>
 
-          <div class="field-group">
-            <label class="field-group-label">Correo electrónico</label>
-            <input type="email" name="email" value="<%= perfil ? perfil.email : '' %>" required>
-          </div>
+        <!-- Cambiar correo -->
+        <div class="config-card">
+          <h3 class="section-title">Correo electrónico</h3>
+          <% if (section === 'correo' && error) { %>
+            <p class="auth-message auth-message--error"><%= error %></p>
+          <% } %>
+          <% if (section === 'correo' && success) { %>
+            <p class="auth-message auth-message--success"><%= success %></p>
+          <% } %>
+          <form method="POST" action="/configuracion/correo" class="profile-form">
+            <div class="field-group">
+              <label class="field-group-label">Nuevo correo</label>
+              <input type="email" name="email" value="<%= perfil ? perfil.email : '' %>" required>
+            </div>
+            <div class="field-group">
+              <label class="field-group-label">Contraseña actual</label>
+              <input type="password" name="password_actual" placeholder="Confirma tu contraseña actual" required>
+            </div>
+            <div class="modal-actions modal-actions--start">
+              <button type="submit" class="btn-primary">Guardar correo</button>
+            </div>
+          </form>
+        </div>
 
-          <div class="field-group">
-            <label class="field-group-label">Contraseña actual</label>
-            <input type="password" name="password_actual" placeholder="Necesaria para guardar cualquier cambio" required>
-          </div>
-
-          <div class="field-group">
-            <label class="field-group-label">Nueva contraseña (opcional)</label>
-            <input type="password" name="password_nueva" id="password_nueva" placeholder="Dejar en blanco para no cambiarla">
-          </div>
-
-          <div class="field-group">
-            <label class="field-group-label">Confirmar nueva contraseña</label>
-            <input type="password" id="password_confirmar" placeholder="Repite la nueva contraseña">
-          </div>
-
-          <div class="modal-actions">
-            <button type="submit" class="btn-primary">Guardar cambios</button>
-          </div>
-        </form>
+        <!-- Cambiar contraseña -->
+        <div class="config-card">
+          <h3 class="section-title">Contraseña</h3>
+          <% if (section === 'password' && error) { %>
+            <p class="auth-message auth-message--error"><%= error %></p>
+          <% } %>
+          <% if (section === 'password' && success) { %>
+            <p class="auth-message auth-message--success"><%= success %></p>
+          <% } %>
+          <form method="POST" action="/configuracion/contrasena" class="profile-form" id="form-contrasena">
+            <div class="field-group">
+              <label class="field-group-label">Contraseña actual</label>
+              <input type="password" name="password_actual" placeholder="Tu contraseña actual" required>
+            </div>
+            <div class="field-group">
+              <label class="field-group-label">Nueva contraseña</label>
+              <input type="password" name="password_nueva" id="password_nueva" placeholder="Nueva contraseña" required>
+            </div>
+            <div class="field-group">
+              <label class="field-group-label">Confirmar nueva contraseña</label>
+              <input type="password" id="password_confirmar" placeholder="Repite la nueva contraseña" required>
+            </div>
+            <div class="modal-actions modal-actions--start">
+              <button type="submit" class="btn-primary">Guardar contraseña</button>
+            </div>
+          </form>
+        </div>
       </div>
     </main>
   </div>
@@ -97,10 +130,10 @@
       if (fallback) fallback.hidden = true;
     });
 
-    document.getElementById('form-perfil').addEventListener('submit', function (e) {
+    document.getElementById('form-contrasena').addEventListener('submit', function (e) {
       const nueva = document.getElementById('password_nueva').value;
       const confirmar = document.getElementById('password_confirmar').value;
-      if (nueva && nueva !== confirmar) {
+      if (nueva !== confirmar) {
         e.preventDefault();
         alert('La nueva contraseña y su confirmación no coinciden.');
       }

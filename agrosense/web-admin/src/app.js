@@ -394,59 +394,92 @@ app.post("/usuarios/:id/eliminar", requireAuth, requireAdmin, async (req, res) =
   }
 });
 
+async function renderConfiguracion(req, res, extra = {}) {
+  const perfil = await axios
+    .get(`${AUTH_URL}/api/auth/usuarios/${req.usuario.id}`)
+    .then((r) => r.data)
+    .catch(() => res.locals.usuario);
+  res.render("configuracion", {
+    active: "configuracion",
+    perfil,
+    section: null,
+    error: null,
+    success: null,
+    ...extra,
+  });
+}
+
+function actualizarCookiePerfil(req, res, actualizado) {
+  const perfilCookie = { ...JSON.parse(req.cookies.usuario || "{}"), ...actualizado };
+  res.cookie("usuario", JSON.stringify(perfilCookie));
+}
+
 app.get("/configuracion", requireAuth, async (req, res) => {
-  try {
-    const { data: perfil } = await axios.get(`${AUTH_URL}/api/auth/usuarios/${req.usuario.id}`);
-    res.render("configuracion", { active: "configuracion", perfil, error: null, success: null });
-  } catch (err) {
-    console.error(err.message);
-    res.render("configuracion", { active: "configuracion", perfil: res.locals.usuario, error: null, success: null });
-  }
+  await renderConfiguracion(req, res);
 });
 
+// Cada aspecto del perfil (foto, correo, contraseña) se guarda por separado:
+// así el usuario no tiene que volver a escribir su contraseña actual solo
+// para subir una foto, ni tocar el correo si solo quiere cambiar la clave.
+
 app.post(
-  "/configuracion/perfil",
+  "/configuracion/foto",
   requireAuth,
   (req, res, next) => {
-    uploadAvatar.single("foto")(req, res, (err) => {
-      if (err) return res.status(400).render("configuracion", {
-        active: "configuracion",
-        perfil: res.locals.usuario,
-        error: err.message,
-        success: null,
-      });
+    uploadAvatar.single("foto")(req, res, async (err) => {
+      if (err) return renderConfiguracion(req, res, { section: "foto", error: err.message });
       next();
     });
   },
   async (req, res) => {
-    const { email, password_actual, password_nueva } = req.body;
-    const foto_url = req.file ? `/uploads/avatars/${req.file.filename}` : undefined;
+    if (!req.file) {
+      return renderConfiguracion(req, res, { section: "foto", error: "Selecciona una imagen" });
+    }
     try {
       const { data: actualizado } = await axios.put(`${AUTH_URL}/api/auth/usuarios/${req.usuario.id}/perfil`, {
-        email,
-        password_actual,
-        password_nueva: password_nueva || undefined,
-        foto_url,
+        foto_url: `/uploads/avatars/${req.file.filename}`,
       });
-      // Refleja el cambio de inmediato en el sidebar/cookie de sesión sin pedir volver a iniciar sesión
-      const perfilCookie = { ...JSON.parse(req.cookies.usuario || "{}"), ...actualizado };
-      res.cookie("usuario", JSON.stringify(perfilCookie));
-      res.render("configuracion", {
-        active: "configuracion",
-        perfil: actualizado,
-        error: null,
-        success: "Perfil actualizado correctamente",
-      });
+      actualizarCookiePerfil(req, res, actualizado);
+      await renderConfiguracion(req, res, { section: "foto", success: "Foto de perfil actualizada" });
     } catch (err) {
       console.error(err.message);
-      const mensaje = err.response?.data?.error || "No se pudo actualizar el perfil";
-      const { data: perfil } = await axios
-        .get(`${AUTH_URL}/api/auth/usuarios/${req.usuario.id}`)
-        .catch(() => ({ data: res.locals.usuario }));
-      res.render("configuracion", { active: "configuracion", perfil, error: mensaje, success: null });
+      const mensaje = err.response?.data?.error || "No se pudo actualizar la foto";
+      await renderConfiguracion(req, res, { section: "foto", error: mensaje });
     }
   }
 );
+
+app.post("/configuracion/correo", requireAuth, async (req, res) => {
+  const { email, password_actual } = req.body;
+  try {
+    const { data: actualizado } = await axios.put(`${AUTH_URL}/api/auth/usuarios/${req.usuario.id}/perfil`, {
+      email,
+      password_actual,
+    });
+    actualizarCookiePerfil(req, res, actualizado);
+    await renderConfiguracion(req, res, { section: "correo", success: "Correo actualizado correctamente" });
+  } catch (err) {
+    console.error(err.message);
+    const mensaje = err.response?.data?.error || "No se pudo actualizar el correo";
+    await renderConfiguracion(req, res, { section: "correo", error: mensaje });
+  }
+});
+
+app.post("/configuracion/contrasena", requireAuth, async (req, res) => {
+  const { password_actual, password_nueva } = req.body;
+  try {
+    const { data: actualizado } = await axios.put(`${AUTH_URL}/api/auth/usuarios/${req.usuario.id}/perfil`, {
+      password_actual,
+      password_nueva,
+    });
+    actualizarCookiePerfil(req, res, actualizado);
+    await renderConfiguracion(req, res, { section: "password", success: "Contraseña actualizada correctamente" });
+  } catch (err) {
+    console.error(err.message);
+    const mensaje = err.response?.data?.error || "No se pudo actualizar la contraseña";
+    await renderConfiguracion(req, res, { section: "password", error: mensaje });
+  }
+});
 
 app.get("/logout", (req, res) => {
   res.clearCookie("token");

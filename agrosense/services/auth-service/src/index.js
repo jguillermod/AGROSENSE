@@ -98,23 +98,27 @@ app.put("/api/auth/usuarios/:id", async (req, res) => {
   }
 });
 
-// El propio usuario edita su perfil (email/contraseña/foto). A diferencia
-// del PUT de administración, aquí se exige la contraseña actual para
-// confirmar la identidad antes de aplicar cualquier cambio sensible.
+// El propio usuario edita su perfil (email/contraseña/foto), cada campo
+// de forma independiente. Cambiar el correo o la contraseña exige la
+// contraseña actual para confirmar identidad; la foto no, porque no es
+// un dato sensible de acceso a la cuenta.
 app.put("/api/auth/usuarios/:id/perfil", async (req, res) => {
   try {
     const { email, password_actual, password_nueva, foto_url } = req.body;
-    if (!password_actual) {
-      return res.status(400).json({ error: "Debes indicar tu contraseña actual" });
-    }
+    const cambiaCredenciales = Boolean(email) || Boolean(password_nueva);
 
     const [rows] = await pool.query("SELECT * FROM usuarios WHERE id = ?", [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });
     const usuario = rows[0];
 
-    const passwordOk = await bcrypt.compare(password_actual, usuario.password_hash);
-    if (!passwordOk) {
-      return res.status(401).json({ error: "La contraseña actual no es correcta" });
+    if (cambiaCredenciales) {
+      if (!password_actual) {
+        return res.status(400).json({ error: "Debes indicar tu contraseña actual" });
+      }
+      const passwordOk = await bcrypt.compare(password_actual, usuario.password_hash);
+      if (!passwordOk) {
+        return res.status(401).json({ error: "La contraseña actual no es correcta" });
+      }
     }
 
     const nuevoEmail = email || usuario.email;

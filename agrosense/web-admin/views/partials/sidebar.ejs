@@ -21,19 +21,16 @@
         <i class="bi bi-people-fill"></i> Usuarios
       </a>
     <% } %>
-    <a href="/configuracion" class="<%= active === 'configuracion' ? 'active' : '' %>">
-      <i class="bi bi-gear-fill"></i> Configuración
-    </a>
   </nav>
   <div class="sidebar-footer">
-    <div class="sidebar-user">
+    <a href="/configuracion" class="sidebar-user <%= active === 'configuracion' ? 'active' : '' %>">
       <% if (usuario && usuario.foto_url) { %>
         <img class="sidebar-avatar" src="<%= usuario.foto_url %>" alt="">
       <% } else { %>
         <i class="bi bi-person-circle sidebar-avatar-fallback"></i>
       <% } %>
       <span><%= usuario && usuario.nombre ? usuario.nombre : (usuario && usuario.email) || 'Usuario' %></span>
-    </div>
+    </a>
     <a href="/logout"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</a>
   </div>
 </aside>

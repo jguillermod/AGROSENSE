@@ -154,6 +154,145 @@ a {
   text-decoration: underline;
 }
 
+/* --- Login: layout dividido con panel decorativo --- */
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+}
+
+.login-hero {
+  position: relative;
+  flex: 1.1;
+  overflow: hidden;
+  background: linear-gradient(150deg, #12401a, #2e7d32 55%, #66bb6a);
+  display: flex;
+  align-items: center;
+  padding: 3rem;
+}
+
+.login-hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 460px;
+  color: #ffffff;
+}
+
+.login-hero-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin-bottom: 2.5rem;
+  color: #e7f2e1;
+}
+
+.login-hero-brand i {
+  font-size: 1.4rem;
+  color: #a5d6a7;
+}
+
+.login-hero h1 {
+  font-size: 2.3rem;
+  line-height: 1.2;
+  margin: 0 0 1rem;
+}
+
+.login-hero p {
+  color: #d7e7d1;
+  font-size: 1.02rem;
+  line-height: 1.6;
+  margin: 0 0 2.2rem;
+  max-width: 380px;
+}
+
+.login-features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.login-features li {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  font-weight: 600;
+  color: #f1f7ee;
+}
+
+.login-feature-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.login-hero-icon {
+  position: absolute;
+  color: rgba(255, 255, 255, 0.14);
+  font-size: 3.2rem;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.login-float {
+  animation: login-float 7s ease-in-out infinite;
+}
+
+.login-float--1 { top: 12%; left: 18%; font-size: 2.6rem; animation-delay: 0s; }
+.login-float--2 { top: 68%; left: 10%; font-size: 4rem; animation-delay: 1.2s; }
+.login-float--3 { top: 20%; left: 78%; font-size: 3.4rem; animation-delay: 2.1s; }
+.login-float--4 { top: 75%; left: 72%; font-size: 3rem; animation-delay: 0.6s; }
+.login-float--5 { top: 45%; left: 48%; font-size: 6rem; opacity: 0.5; animation-delay: 1.7s; }
+
+@keyframes login-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-18px) rotate(6deg); }
+}
+
+.login-panel {
+  flex: 1;
+  min-width: 340px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: #f4f6f2;
+}
+
+.input-icon-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon-group i {
+  position: absolute;
+  left: 1rem;
+  color: #9aa19a;
+  font-size: 0.95rem;
+  pointer-events: none;
+}
+
+.input-icon-group input {
+  padding-left: 2.6rem !important;
+}
+
+@media (max-width: 860px) {
+  .login-hero {
+    display: none;
+  }
+}
+
 /* --- Panel administrativo (sidebar + contenido) --- */
 
 .app-shell {
@@ -244,10 +383,24 @@ a {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  color: #e5ece0;
+  color: #e5ece0 !important;
   font-weight: 600;
   margin-bottom: 0.5rem;
-  padding: 0 0.4rem;
+  padding: 0.5rem 0.4rem !important;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.sidebar-user:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff !important;
+  transform: translateX(3px);
+}
+
+.sidebar-user.active {
+  background: #2e7d32;
+  color: #ffffff !important;
 }
 
 .sidebar-avatar {
@@ -853,8 +1006,36 @@ table.data-table {
   font-weight: 600;
 }
 
+.config-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.2rem;
+  margin-top: 1.8rem;
+  align-items: start;
+}
+
+.config-card {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 1.5rem 1.6rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.config-card:hover {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.config-card .section-title {
+  margin: 0 0 1.1rem;
+}
+
+.modal-actions--start {
+  justify-content: flex-start;
+}
+
 .profile-form {
-  padding: 1.6rem 1.8rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
