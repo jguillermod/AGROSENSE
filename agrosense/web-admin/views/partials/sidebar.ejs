@@ -1,0 +1,39 @@
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <i class="bi bi-flower2"></i>
+    <span>AgroSense</span>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/dashboard" class="<%= active === 'dashboard' ? 'active' : '' %>">
+      <i class="bi bi-grid-1x2-fill"></i> Dashboard
+    </a>
+    <a href="/fincas" class="<%= active === 'fincas' ? 'active' : '' %>">
+      <i class="bi bi-house-door-fill"></i> Fincas
+    </a>
+    <a href="/parcelas" class="<%= active === 'parcelas' ? 'active' : '' %>">
+      <i class="bi bi-map-fill"></i> Parcelas
+    </a>
+    <a href="/sensores" class="<%= active === 'sensores' ? 'active' : '' %>">
+      <i class="bi bi-broadcast"></i> Sensores
+    </a>
+    <% if (usuario && usuario.rol === 'admin') { %>
+      <a href="/usuarios" class="<%= active === 'usuarios' ? 'active' : '' %>">
+        <i class="bi bi-people-fill"></i> Usuarios
+      </a>
+    <% } %>
+    <a href="/configuracion" class="<%= active === 'configuracion' ? 'active' : '' %>">
+      <i class="bi bi-gear-fill"></i> Configuración
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="sidebar-user">
+      <% if (usuario && usuario.foto_url) { %>
+        <img class="sidebar-avatar" src="<%= usuario.foto_url %>" alt="">
+      <% } else { %>
+        <i class="bi bi-person-circle sidebar-avatar-fallback"></i>
+      <% } %>
+      <span><%= usuario && usuario.nombre ? usuario.nombre : (usuario && usuario.email) || 'Usuario' %></span>
+    </div>
+    <a href="/logout"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</a>
+  </div>
+</aside>

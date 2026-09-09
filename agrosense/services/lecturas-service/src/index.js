@@ -1,20 +1,39 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
 const pool = require("./db");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+const hash = (valor) => crypto.createHash("sha256").update(valor).digest("hex");
+
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "lecturas-service" });
 });
 
-// El ESP32 envía sus lecturas aquí periódicamente (RF-07)
+// El ESP32 envía sus lecturas aquí periódicamente (RF-07).
+// Debe autenticarse con la api_key que recibió al vincularse (ver
+// POST /api/estaciones/vincular en fincas-service) para evitar que
+// cualquiera pueda inyectar lecturas falsas a nombre de otra estación.
 app.post("/api/lecturas", async (req, res) => {
   try {
+    const apiKey = req.get("x-api-key");
     const { estacion_id, humedad_suelo, temperatura, humedad_ambiental } = req.body;
+
+    if (!apiKey) {
+      return res.status(401).json({ error: "Falta la cabecera x-api-key" });
+    }
+
+    const [estaciones] = await pool.query(
+      "SELECT api_key_hash FROM estaciones WHERE id = ?",
+      [estacion_id]
+    );
+    if (estaciones.length === 0 || estaciones[0].api_key_hash !== hash(apiKey)) {
+      return res.status(401).json({ error: "api_key inválida para esta estación" });
+    }
 
     const [result] = await pool.query(
       `INSERT INTO lecturas (estacion_id, humedad_suelo, temperatura, humedad_ambiental, fecha)

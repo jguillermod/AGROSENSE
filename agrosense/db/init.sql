@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     email VARCHAR(150) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     rol ENUM('admin', 'agricultor') NOT NULL DEFAULT 'agricultor',
+    foto_url VARCHAR(255) NULL,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -34,8 +35,23 @@ CREATE TABLE IF NOT EXISTS estaciones (
     id INT AUTO_INCREMENT PRIMARY KEY,
     codigo VARCHAR(50) NOT NULL UNIQUE,
     parcela_id INT NOT NULL,
+    api_key_hash CHAR(64) NOT NULL,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (parcela_id) REFERENCES parcelas(id)
+);
+
+-- Tokens de un solo uso para vincular un sensor físico a una parcela (RF-06)
+CREATE TABLE IF NOT EXISTS sensor_tokens (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    token CHAR(32) NOT NULL UNIQUE,
+    parcela_id INT NOT NULL,
+    estado ENUM('pendiente', 'usado', 'expirado') NOT NULL DEFAULT 'pendiente',
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expira_en TIMESTAMP NOT NULL,
+    usado_en TIMESTAMP NULL,
+    estacion_id INT NULL,
+    FOREIGN KEY (parcela_id) REFERENCES parcelas(id),
+    FOREIGN KEY (estacion_id) REFERENCES estaciones(id)
 );
 
 CREATE TABLE IF NOT EXISTS lecturas (
@@ -57,6 +73,15 @@ CREATE TABLE IF NOT EXISTS alertas (
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (parcela_id) REFERENCES parcelas(id),
     FOREIGN KEY (estacion_id) REFERENCES estaciones(id)
+);
+
+-- Parcelas asignadas a cada usuario (un agricultor puede tener varias)
+CREATE TABLE IF NOT EXISTS usuario_parcelas (
+    usuario_id INT NOT NULL,
+    parcela_id INT NOT NULL,
+    PRIMARY KEY (usuario_id, parcela_id),
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE
 );
 
 -- Tabla que llena el servicio ETL con los resúmenes diarios

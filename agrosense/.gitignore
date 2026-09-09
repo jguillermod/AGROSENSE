@@ -2,6 +2,9 @@
 node_modules/
 npm-debug.log*
 
+# Fotos de perfil subidas por los usuarios
+web-admin/public/uploads/
+
 # Python
 __pycache__/
 *.pyc

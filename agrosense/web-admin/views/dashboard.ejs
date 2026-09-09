@@ -1,32 +1,93 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <title>AgroSense - Dashboard</title>
-  <link rel="stylesheet" href="/css/style.css">
+  <%- include('partials/head', { titulo: 'Dashboard' }) %>
 </head>
 <body>
-  <header>
-    <h1>AgroSense - Panel administrativo</h1>
-    <a href="/logout">Cerrar sesión</a>
-  </header>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
 
-  <main>
-    <h2>Fincas registradas</h2>
-    <table>
-      <thead>
-        <tr><th>ID</th><th>Nombre</th><th>Ubicación</th></tr>
-      </thead>
-      <tbody>
-        <% fincas.forEach(f => { %>
-          <tr>
-            <td><%= f.id %></td>
-            <td><%= f.nombre %></td>
-            <td><%= f.ubicacion %></td>
-          </tr>
-        <% }) %>
-      </tbody>
-    </table>
-  </main>
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Dashboard general</h2>
+          <p class="page-subtitle">Resumen de todas las parcelas activas</p>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card stat-card--green">
+          <i class="bi bi-broadcast stat-icon"></i>
+          <div class="stat-value"><%= resumen.estaciones_activas || 0 %></div>
+          <div class="stat-label">Estaciones activas</div>
+        </div>
+        <div class="stat-card stat-card--amber">
+          <i class="bi bi-exclamation-triangle-fill stat-icon"></i>
+          <div class="stat-value"><%= resumen.alertas_hoy || 0 %></div>
+          <div class="stat-label">Alertas hoy</div>
+        </div>
+        <div class="stat-card stat-card--teal">
+          <i class="bi bi-droplet-fill stat-icon"></i>
+          <div class="stat-value"><%= resumen.humedad_promedio != null ? resumen.humedad_promedio + '%' : '—' %></div>
+          <div class="stat-label">Humedad promedio</div>
+        </div>
+        <div class="stat-card stat-card--red">
+          <i class="bi bi-thermometer-half stat-icon"></i>
+          <div class="stat-value"><%= resumen.temperatura_promedio != null ? resumen.temperatura_promedio + '°C' : '—' %></div>
+          <div class="stat-label">Temp. promedio</div>
+        </div>
+      </div>
+
+      <div class="panel-dark">
+        <h3>Humedad promedio por finca (7 días)</h3>
+        <% if (historial.length === 0) { %>
+          <p class="panel-empty">Todavía no hay reportes diarios para graficar. El servicio ETL los genera automáticamente a partir de las lecturas de los sensores.</p>
+        <% } else { %>
+          <canvas id="chart-humedad" height="90"></canvas>
+        <% } %>
+      </div>
+    </main>
+  </div>
+
+  <% if (historial.length > 0) { %>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script>
+    const historial = <%- JSON.stringify(historial) %>;
+    const colores = ['#66bb6a', '#e6a23c', '#26a69a', '#5c6bc0', '#ef5350'];
+
+    const dias = [...new Set(historial.map(r => r.dia))].sort();
+    const fincas = [...new Set(historial.map(r => r.finca))];
+
+    const datasets = fincas.map((finca, i) => ({
+      label: finca,
+      data: dias.map(dia => {
+        const fila = historial.find(r => r.finca === finca && r.dia === dia);
+        return fila ? Number(fila.humedad) : null;
+      }),
+      borderColor: colores[i % colores.length],
+      backgroundColor: colores[i % colores.length],
+      tension: 0.35,
+      spanGaps: true,
+    }));
+
+    new Chart(document.getElementById('chart-humedad'), {
+      type: 'line',
+      data: {
+        labels: dias.map(d => new Date(d).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })),
+        datasets,
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: '#e8ece4' } },
+        },
+        scales: {
+          x: { ticks: { color: '#b7c2ae' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+          y: { ticks: { color: '#b7c2ae' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+        },
+      },
+    });
+  </script>
+  <% } %>
 </body>
 </html>

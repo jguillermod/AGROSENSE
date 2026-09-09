@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <%- include('partials/head', { titulo: 'Sensores' }) %>
+</head>
+<body>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
+
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Sensores</h2>
+          <p class="page-subtitle"><%= estaciones.length %> estaciones registradas</p>
+        </div>
+        <% if (usuario && usuario.rol === 'admin') { %>
+          <button class="btn-primary" onclick="document.getElementById('modal-token').classList.add('open')">
+            <i class="bi bi-link-45deg"></i> Vincular sensor
+          </button>
+        <% } %>
+      </div>
+
+      <% if (error) { %>
+        <p class="auth-message auth-message--error"><%= error %></p>
+      <% } %>
+
+      <% if (tokenGenerado) { %>
+        <div class="token-banner">
+          <div class="token-banner-head">
+            <i class="bi bi-key-fill"></i>
+            <div>
+              <strong>Token de vinculación generado</strong>
+              <p>Válido por 30 minutos y de un solo uso. Configúralo en el sensor antes de que expire.</p>
+            </div>
+          </div>
+          <code class="token-value"><%= tokenGenerado.token %></code>
+          <p class="token-hint">
+            El sensor debe hacer <code>POST /api/estaciones/vincular</code> con
+            <code>{ "token": "<%= tokenGenerado.token %>", "codigo": "&lt;identificador-del-sensor&gt;" }</code>.
+            La respuesta trae un <code>api_key</code> que solo se muestra una vez: el sensor debe guardarlo
+            y enviarlo en la cabecera <code>x-api-key</code> con cada lectura a <code>POST /api/lecturas</code>.
+          </p>
+        </div>
+      <% } %>
+
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Código</th><th>Finca</th><th>Parcela</th><th>Estado</th><th>Humedad</th><th>Temp.</th><th>Última lectura</th>
+              <% if (usuario && usuario.rol === 'admin') { %><th></th><% } %>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (estaciones.length === 0) { %>
+              <tr><td colspan="<%= usuario && usuario.rol === 'admin' ? 8 : 7 %>" class="data-table-empty">Todavía no hay estaciones vinculadas.</td></tr>
+            <% } %>
+            <% estaciones.forEach(e => {
+              const minutos = e.ultima_lectura ? (Date.now() - new Date(e.ultima_lectura).getTime()) / 60000 : null;
+              let estadoLabel = 'Sin datos', estadoBadge = 'badge--neutral';
+              if (minutos !== null) {
+                if (minutos <= 15) { estadoLabel = 'En línea'; estadoBadge = 'badge--success'; }
+                else { estadoLabel = 'Sin señal'; estadoBadge = 'badge--warning'; }
+              }
+            %>
+              <tr>
+                <td><i class="bi bi-broadcast"></i> <%= e.codigo %></td>
+                <td><%= e.finca_nombre %></td>
+                <td><%= e.parcela_nombre %></td>
+                <td><span class="badge <%= estadoBadge %>"><%= estadoLabel %></span></td>
+                <td><%= e.humedad_suelo != null ? Math.round(e.humedad_suelo) + '%' : '—' %></td>
+                <td><%= e.temperatura != null ? Math.round(e.temperatura) + '°C' : '—' %></td>
+                <td><%= e.ultima_lectura ? new Date(e.ultima_lectura).toLocaleString('es-ES') : 'Sin lecturas' %></td>
+                <% if (usuario && usuario.rol === 'admin') { %>
+                  <td class="row-actions">
+                    <button class="menu-trigger" onclick="this.parentElement.classList.toggle('open')">
+                      <i class="bi bi-three-dots-vertical"></i>
+                    </button>
+                    <div class="menu-dropdown">
+                      <button type="button" class="menu-item" data-id="<%= e.id %>" data-codigo="<%= e.codigo %>" onclick="abrirEditarSensor(this)">
+                        <i class="bi bi-pencil-fill"></i> Editar
+                      </button>
+                      <form method="POST" action="/sensores/<%= e.id %>/eliminar"
+                        onsubmit="return confirm('¿Eliminar el sensor &quot;<%= e.codigo %>&quot;? Se borrará también su historial de lecturas.')">
+                        <button type="submit" class="menu-item danger"><i class="bi bi-trash-fill"></i> Eliminar</button>
+                      </form>
+                    </div>
+                  </td>
+                <% } %>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <% if (usuario && usuario.rol === 'admin') { %>
+        <h3 class="section-title">Tokens de vinculación</h3>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Parcela</th><th>Token</th><th>Estado</th><th>Expira</th><th></th></tr>
+            </thead>
+            <tbody>
+              <% if (tokens.length === 0) { %>
+                <tr><td colspan="5" class="data-table-empty">No se han generado tokens todavía.</td></tr>
+              <% } %>
+              <% tokens.forEach(t => {
+                const badgeToken = { pendiente: 'badge--warning', usado: 'badge--success', expirado: 'badge--neutral' }[t.estado];
+              %>
+                <tr>
+                  <td><%= t.finca_nombre %> · <%= t.parcela_nombre %></td>
+                  <td><code><%= t.token.slice(0, 8) %>…</code></td>
+                  <td><span class="badge <%= badgeToken %>"><%= t.estado %></span></td>
+                  <td><%= new Date(t.expira_en).toLocaleString('es-ES') %></td>
+                  <td class="data-table-link">
+                    <% if (t.estado === 'pendiente') { %>
+                      <form method="POST" action="/sensores/tokens/<%= t.id %>/revocar">
+                        <button type="submit" class="link-danger">Revocar</button>
+                      </form>
+                    <% } %>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-token">
+    <div class="modal-box">
+      <h3><i class="bi bi-link-45deg"></i> Vincular sensor</h3>
+      <form method="POST" action="/sensores/tokens">
+        <select name="parcela_id" required>
+          <option value="" disabled selected>Selecciona una parcela</option>
+          <% parcelas.forEach(p => { %>
+            <option value="<%= p.id %>"><%= p.finca_nombre %> · <%= p.nombre %></option>
+          <% }) %>
+        </select>
+        <p class="modal-hint">Se generará un token de un solo uso, válido por 30 minutos, para que el sensor físico se vincule a esa parcela.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-token').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary">Generar token</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-editar-sensor">
+    <div class="modal-box">
+      <h3><i class="bi bi-pencil-fill"></i> Editar sensor</h3>
+      <form method="POST" id="form-editar-sensor" action="/sensores/0/editar">
+        <input type="text" name="codigo" id="editar-codigo" placeholder="Código del sensor" required>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-editar-sensor').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('.row-actions.open').forEach((el) => {
+        if (!el.contains(e.target)) el.classList.remove('open');
+      });
+    });
+
+    function abrirEditarSensor(btn) {
+      document.getElementById('form-editar-sensor').action = '/sensores/' + btn.dataset.id + '/editar';
+      document.getElementById('editar-codigo').value = btn.dataset.codigo;
+      document.getElementById('modal-editar-sensor').classList.add('open');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <%- include('partials/head', { titulo: 'Parcelas' }) %>
+</head>
+<body>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
+
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Parcelas</h2>
+          <p class="page-subtitle">
+            <% if (fincaActiva) { %>
+              <%= parcelas.length %> registradas en <%= fincaActiva.nombre %>
+            <% } else { %>
+              No hay fincas registradas todavía
+            <% } %>
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <% if (fincas.length > 0) { %>
+            <select class="finca-select" onchange="location.href='/parcelas?finca=' + this.value">
+              <% fincas.forEach(f => { %>
+                <option value="<%= f.id %>" <%= fincaActiva && fincaActiva.id === f.id ? 'selected' : '' %>><%= f.nombre %></option>
+              <% }) %>
+            </select>
+          <% } %>
+          <button class="btn-primary" <%= fincaActiva ? '' : 'disabled' %> onclick="document.getElementById('modal-parcela').classList.add('open')">
+            <i class="bi bi-plus-lg"></i> Nueva parcela
+          </button>
+        </div>
+      </div>
+
+      <% if (error) { %>
+        <p class="auth-message auth-message--error"><%= error %></p>
+      <% } %>
+
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Parcela</th><th>Humedad</th><th>Temp.</th><th>Estado</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% if (parcelas.length === 0) { %>
+              <tr><td colspan="5" class="data-table-empty">No hay parcelas registradas en esta finca.</td></tr>
+            <% } %>
+            <% parcelas.forEach(p => {
+              const badgeClass = {
+                'Necesita riego': 'badge--warning',
+                'Óptimo': 'badge--success',
+                'Riesgo de hongos': 'badge--danger',
+                'Riesgo por calor': 'badge--danger',
+                'Sin datos': 'badge--neutral',
+              }[p.estado] || 'badge--neutral';
+            %>
+              <tr>
+                <td><%= p.nombre %></td>
+                <td><%= p.humedad_actual != null ? Math.round(p.humedad_actual) + '%' : '—' %></td>
+                <td><%= p.temperatura_actual != null ? Math.round(p.temperatura_actual) + '°C' : '—' %></td>
+                <td><span class="badge <%= badgeClass %>"><%= p.estado %></span></td>
+                <td class="row-actions">
+                  <button class="menu-trigger" onclick="this.parentElement.classList.toggle('open')">
+                    <i class="bi bi-three-dots-vertical"></i>
+                  </button>
+                  <div class="menu-dropdown">
+                    <button type="button" class="menu-item"
+                      data-id="<%= p.id %>" data-nombre="<%= p.nombre %>"
+                      data-humedad-min="<%= p.humedad_min %>" data-humedad-max="<%= p.humedad_max %>"
+                      data-temperatura-max="<%= p.temperatura_max %>"
+                      onclick="abrirEditarParcela(this)">
+                      <i class="bi bi-pencil-fill"></i> Editar
+                    </button>
+                    <form method="POST" action="/parcelas/<%= p.id %>/eliminar"
+                      onsubmit="return confirm('¿Eliminar la parcela &quot;<%= p.nombre %>&quot;? Esta acción no se puede deshacer.')">
+                      <input type="hidden" name="finca_id" value="<%= fincaActiva.id %>">
+                      <button type="submit" class="menu-item danger"><i class="bi bi-trash-fill"></i> Eliminar</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-parcela">
+    <div class="modal-box">
+      <h3><i class="bi bi-map-fill"></i> Nueva parcela</h3>
+      <form method="POST" action="/parcelas">
+        <input type="hidden" name="finca_id" value="<%= fincaActiva ? fincaActiva.id : '' %>">
+        <input type="text" name="nombre" placeholder="Nombre de la parcela" required>
+        <input type="number" step="0.1" name="humedad_min" placeholder="Humedad mínima (%)">
+        <input type="number" step="0.1" name="humedad_max" placeholder="Humedad máxima (%)">
+        <input type="number" step="0.1" name="temperatura_max" placeholder="Temperatura máxima (°C)">
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-parcela').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-editar-parcela">
+    <div class="modal-box">
+      <h3><i class="bi bi-pencil-fill"></i> Editar parcela</h3>
+      <form method="POST" id="form-editar-parcela" action="/parcelas/0/editar">
+        <input type="hidden" name="finca_id" value="<%= fincaActiva ? fincaActiva.id : '' %>">
+        <input type="text" name="nombre" id="editar-nombre" placeholder="Nombre de la parcela" required>
+        <input type="number" step="0.1" name="humedad_min" id="editar-humedad-min" placeholder="Humedad mínima (%)">
+        <input type="number" step="0.1" name="humedad_max" id="editar-humedad-max" placeholder="Humedad máxima (%)">
+        <input type="number" step="0.1" name="temperatura_max" id="editar-temperatura-max" placeholder="Temperatura máxima (°C)">
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-editar-parcela').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('.row-actions.open').forEach((el) => {
+        if (!el.contains(e.target)) el.classList.remove('open');
+      });
+    });
+
+    function abrirEditarParcela(btn) {
+      document.getElementById('form-editar-parcela').action = '/parcelas/' + btn.dataset.id + '/editar';
+      document.getElementById('editar-nombre').value = btn.dataset.nombre;
+      document.getElementById('editar-humedad-min').value = btn.dataset.humedadMin;
+      document.getElementById('editar-humedad-max').value = btn.dataset.humedadMax;
+      document.getElementById('editar-temperatura-max').value = btn.dataset.temperaturaMax;
+      document.getElementById('modal-editar-parcela').classList.add('open');
+    }
+  </script>
+</body>
+</html>

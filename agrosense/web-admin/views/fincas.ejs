@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <%- include('partials/head', { titulo: 'Fincas' }) %>
+</head>
+<body>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
+
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Fincas</h2>
+          <p class="page-subtitle"><%= fincas.length %> registradas</p>
+        </div>
+        <button class="btn-primary" onclick="document.getElementById('modal-finca').classList.add('open')">
+          <i class="bi bi-plus-lg"></i> Nueva finca
+        </button>
+      </div>
+
+      <% if (error) { %>
+        <p class="auth-message auth-message--error"><%= error %></p>
+      <% } %>
+
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Finca</th><th>Ubicación</th><th></th><th></th></tr>
+          </thead>
+          <tbody>
+            <% if (fincas.length === 0) { %>
+              <tr><td colspan="4" class="data-table-empty">Todavía no hay fincas registradas.</td></tr>
+            <% } %>
+            <% fincas.forEach(f => { %>
+              <tr>
+                <td><%= f.nombre %></td>
+                <td><%= f.ubicacion || '—' %></td>
+                <td class="data-table-link">
+                  <a href="/parcelas?finca=<%= f.id %>">Ver parcelas <i class="bi bi-arrow-right"></i></a>
+                </td>
+                <td class="row-actions">
+                  <button class="menu-trigger" onclick="this.parentElement.classList.toggle('open')">
+                    <i class="bi bi-three-dots-vertical"></i>
+                  </button>
+                  <div class="menu-dropdown">
+                    <button type="button" class="menu-item"
+                      data-id="<%= f.id %>" data-nombre="<%= f.nombre %>" data-ubicacion="<%= f.ubicacion || '' %>"
+                      onclick="abrirEditarFinca(this)">
+                      <i class="bi bi-pencil-fill"></i> Editar
+                    </button>
+                    <form method="POST" action="/fincas/<%= f.id %>/eliminar"
+                      onsubmit="return confirm('¿Eliminar la finca &quot;<%= f.nombre %>&quot;?')">
+                      <button type="submit" class="menu-item danger"><i class="bi bi-trash-fill"></i> Eliminar</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-finca">
+    <div class="modal-box">
+      <h3><i class="bi bi-house-door-fill"></i> Nueva finca</h3>
+      <form method="POST" action="/fincas">
+        <input type="text" name="nombre" placeholder="Nombre de la finca" required>
+        <input type="text" name="ubicacion" placeholder="Ubicación">
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-finca').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-editar-finca">
+    <div class="modal-box">
+      <h3><i class="bi bi-pencil-fill"></i> Editar finca</h3>
+      <form method="POST" id="form-editar-finca" action="/fincas/0/editar">
+        <input type="text" name="nombre" id="editar-finca-nombre" placeholder="Nombre de la finca" required>
+        <input type="text" name="ubicacion" id="editar-finca-ubicacion" placeholder="Ubicación">
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-editar-finca').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('.row-actions.open').forEach((el) => {
+        if (!el.contains(e.target)) el.classList.remove('open');
+      });
+    });
+
+    function abrirEditarFinca(btn) {
+      document.getElementById('form-editar-finca').action = '/fincas/' + btn.dataset.id + '/editar';
+      document.getElementById('editar-finca-nombre').value = btn.dataset.nombre;
+      document.getElementById('editar-finca-ubicacion').value = btn.dataset.ubicacion;
+      document.getElementById('modal-editar-finca').classList.add('open');
+    }
+  </script>
+</body>
+</html>

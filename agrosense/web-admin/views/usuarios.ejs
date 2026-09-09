@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <%- include('partials/head', { titulo: 'Usuarios' }) %>
+</head>
+<body>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
+
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Usuarios</h2>
+          <p class="page-subtitle"><%= usuarios.length %> cuentas registradas</p>
+        </div>
+        <button class="btn-primary" onclick="document.getElementById('modal-usuario').classList.add('open')">
+          <i class="bi bi-person-plus-fill"></i> Nuevo usuario
+        </button>
+      </div>
+
+      <% if (error) { %>
+        <p class="auth-message auth-message--error"><%= error %></p>
+      <% } %>
+
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Parcelas asignadas</th><th>Registrado</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% if (usuarios.length === 0) { %>
+              <tr><td colspan="6" class="data-table-empty">No hay usuarios registrados.</td></tr>
+            <% } %>
+            <% usuarios.forEach(u => { %>
+              <tr>
+                <td><i class="bi bi-person-circle"></i> <%= u.nombre %></td>
+                <td><%= u.email %></td>
+                <td><span class="badge <%= u.rol === 'admin' ? 'badge--success' : 'badge--neutral' %>"><%= u.rol %></span></td>
+                <td><%= (parcelasPorUsuario[u.id] || []).join(', ') || '—' %></td>
+                <td><%= new Date(u.creado_en).toLocaleDateString('es-ES') %></td>
+                <td class="row-actions">
+                  <button class="menu-trigger" onclick="this.parentElement.classList.toggle('open')">
+                    <i class="bi bi-three-dots-vertical"></i>
+                  </button>
+                  <div class="menu-dropdown">
+                    <button type="button" class="menu-item"
+                      data-id="<%= u.id %>" data-nombre="<%= u.nombre %>" data-email="<%= u.email %>"
+                      data-rol="<%= u.rol %>" data-parcela-ids="<%= (parcelaIdsPorUsuario[u.id] || []).join(',') %>"
+                      onclick="abrirEditarUsuario(this)">
+                      <i class="bi bi-pencil-fill"></i> Editar
+                    </button>
+                    <% if (String(u.id) !== String(usuario.id)) { %>
+                      <form method="POST" action="/usuarios/<%= u.id %>/eliminar"
+                        onsubmit="return confirm('¿Eliminar al usuario &quot;<%= u.nombre %>&quot;?')">
+                        <button type="submit" class="menu-item danger"><i class="bi bi-trash-fill"></i> Eliminar</button>
+                      </form>
+                    <% } %>
+                  </div>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-usuario">
+    <div class="modal-box modal-box--wide">
+      <h3><i class="bi bi-person-plus-fill"></i> Nuevo usuario</h3>
+      <form method="POST" action="/usuarios">
+        <input type="text" name="nombre" placeholder="Nombre completo" required>
+        <input type="email" name="email" placeholder="Correo electrónico" required>
+        <input type="password" name="password" placeholder="Contraseña" required>
+        <select name="rol" required>
+          <option value="" disabled selected>Selecciona un rol</option>
+          <option value="agricultor">Agricultor</option>
+          <option value="admin">Administrador</option>
+        </select>
+
+        <div class="field-group">
+          <label class="field-group-label">Parcelas asignadas</label>
+          <div class="checklist">
+            <% if (parcelas.length === 0) { %>
+              <p class="panel-empty">No hay parcelas registradas todavía.</p>
+            <% } %>
+            <% parcelas.forEach(p => { %>
+              <label class="checklist-item">
+                <input type="checkbox" name="parcela_ids" value="<%= p.id %>">
+                <%= p.finca_nombre %> · <%= p.nombre %>
+              </label>
+            <% }) %>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-usuario').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary">Crear usuario</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-editar-usuario">
+    <div class="modal-box modal-box--wide">
+      <h3><i class="bi bi-pencil-fill"></i> Editar usuario</h3>
+      <form method="POST" id="form-editar-usuario" action="/usuarios/0/editar">
+        <input type="text" name="nombre" id="editar-usuario-nombre" placeholder="Nombre completo" required>
+        <input type="email" name="email" id="editar-usuario-email" placeholder="Correo electrónico" required>
+        <input type="password" name="password" placeholder="Nueva contraseña (dejar en blanco para no cambiar)">
+        <select name="rol" id="editar-usuario-rol" required>
+          <option value="agricultor">Agricultor</option>
+          <option value="admin">Administrador</option>
+        </select>
+
+        <div class="field-group">
+          <label class="field-group-label">Parcelas asignadas</label>
+          <div class="checklist" id="editar-usuario-parcelas">
+            <% if (parcelas.length === 0) { %>
+              <p class="panel-empty">No hay parcelas registradas todavía.</p>
+            <% } %>
+            <% parcelas.forEach(p => { %>
+              <label class="checklist-item">
+                <input type="checkbox" name="parcela_ids" value="<%= p.id %>">
+                <%= p.finca_nombre %> · <%= p.nombre %>
+              </label>
+            <% }) %>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-editar-usuario').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('.row-actions.open').forEach((el) => {
+        if (!el.contains(e.target)) el.classList.remove('open');
+      });
+    });
+
+    function abrirEditarUsuario(btn) {
+      document.getElementById('form-editar-usuario').action = '/usuarios/' + btn.dataset.id + '/editar';
+      document.getElementById('editar-usuario-nombre').value = btn.dataset.nombre;
+      document.getElementById('editar-usuario-email').value = btn.dataset.email;
+      document.getElementById('editar-usuario-rol').value = btn.dataset.rol;
+
+      const idsAsignados = btn.dataset.parcelaIds ? btn.dataset.parcelaIds.split(',') : [];
+      document.querySelectorAll('#editar-usuario-parcelas input[type="checkbox"]').forEach((chk) => {
+        chk.checked = idsAsignados.includes(chk.value);
+      });
+
+      document.getElementById('modal-editar-usuario').classList.add('open');
+    }
+  </script>
+</body>
+</html>
