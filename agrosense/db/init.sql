@@ -7,8 +7,23 @@ CREATE TABLE IF NOT EXISTS usuarios (
     email VARCHAR(150) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     rol ENUM('admin', 'agricultor') NOT NULL DEFAULT 'agricultor',
+    email_verificado TINYINT(1) NOT NULL DEFAULT 0,
     foto_url VARCHAR(255) NULL,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Enlaces de confirmación de correo y recuperación de contraseña.
+-- Se guarda el hash del token, nunca el token que recibe el usuario.
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT NOT NULL,
+    tipo ENUM('verificacion', 'recuperacion') NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    expira_en TIMESTAMP NOT NULL,
+    usado_en TIMESTAMP NULL,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    INDEX idx_auth_token (token_hash, tipo, expira_en)
 );
 
 CREATE TABLE IF NOT EXISTS fincas (
