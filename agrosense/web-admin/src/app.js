@@ -30,7 +30,7 @@ const uploadAvatar = multer({
   }),
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.mimetype)) {
+    if (!["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"].includes(file.mimetype)) {
       return cb(new Error("Formato de imagen no soportado"));
     }
     cb(null, true);
@@ -61,6 +61,49 @@ function requireAdmin(req, res, next) {
   if (req.usuario?.rol !== "admin") return res.redirect("/dashboard");
   next();
 }
+
+// Igual que requireAuth pero para clientes de API (la app móvil): no hay
+// cookies de sesión, así que la identidad viaja en la cabecera
+// Authorization: Bearer <token> y la respuesta es siempre JSON.
+function requireBearerAuth(req, res, next) {
+  const authHeader = req.get("authorization") || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "Falta el token de autenticación" });
+  try {
+    req.usuario = jwt.verify(token, process.env.JWT_SECRET);
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido o expirado" });
+  }
+}
+
+// Sube la foto de perfil desde la app móvil y reutiliza exactamente el
+// mismo almacenamiento (uploadAvatar) y el mismo PUT de perfil que usa
+// /configuracion/foto en el panel web, para que ambos clientes vean
+// siempre la misma foto.
+app.post(
+  "/api/perfil/foto",
+  requireBearerAuth,
+  (req, res, next) => {
+    uploadAvatar.single("foto")(req, res, (err) => {
+      if (err) return res.status(400).json({ error: err.message });
+      next();
+    });
+  },
+  async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Selecciona una imagen" });
+    try {
+      const { data: actualizado } = await axios.put(`${AUTH_URL}/api/auth/usuarios/${req.usuario.id}/perfil`, {
+        foto_url: `/uploads/avatars/${req.file.filename}`,
+      });
+      res.json(actualizado);
+    } catch (err) {
+      console.error(err.message);
+      const mensaje = err.response?.data?.error || "No se pudo actualizar la foto";
+      res.status(500).json({ error: mensaje });
+    }
+  }
+);
 
 app.get("/", (req, res) => res.redirect("/login"));
 

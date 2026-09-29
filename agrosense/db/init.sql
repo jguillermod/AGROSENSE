@@ -6,7 +6,9 @@ CREATE TABLE IF NOT EXISTS usuarios (
     nombre VARCHAR(100) NOT NULL,
     email VARCHAR(150) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
-    rol ENUM('admin', 'agricultor') NOT NULL DEFAULT 'agricultor',
+    -- agronomo: rol de solo lectura para quien va a campo; solo ve las
+    -- parcelas que el admin le asignó en usuario_parcelas (RF-08).
+    rol ENUM('admin', 'agricultor', 'agronomo') NOT NULL DEFAULT 'agricultor',
     foto_url VARCHAR(255) NULL,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -82,6 +84,23 @@ CREATE TABLE IF NOT EXISTS usuario_parcelas (
     PRIMARY KEY (usuario_id, parcela_id),
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
     FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE
+);
+
+-- Registro manual de campo por parcela: humedad/temperatura observadas a
+-- ojo y/o anotaciones libres, cargadas por quien tenga esa parcela
+-- asignada (o el admin, en cualquiera). Es independiente de "lecturas"
+-- (que llenan los sensores físicos): no participa en el cálculo de
+-- "estado" ni en las gráficas, es una bitácora de campo aparte.
+CREATE TABLE IF NOT EXISTS registros_manuales (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    parcela_id INT NOT NULL,
+    usuario_id INT NOT NULL,
+    humedad_suelo DECIMAL(5,2) NULL,
+    temperatura DECIMAL(5,2) NULL,
+    anotaciones TEXT NULL,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
 );
 
 -- Tabla que llena el servicio ETL con los resúmenes diarios

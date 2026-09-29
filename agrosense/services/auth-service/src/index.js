@@ -9,6 +9,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASSWORD_MIN_LENGTH = 6;
+
 // Salud del servicio (útil para healthchecks/monitoreo)
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "auth-service" });
@@ -20,6 +23,12 @@ app.post("/api/auth/register", async (req, res) => {
     const { nombre, email, password, rol } = req.body;
     if (!nombre || !email || !password || !rol) {
       return res.status(400).json({ error: "Faltan campos obligatorios" });
+    }
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({ error: "El correo no tiene un formato válido" });
+    }
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      return res.status(400).json({ error: `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres` });
     }
 
     const hash = await bcrypt.hash(password, 10);
@@ -74,6 +83,12 @@ app.put("/api/auth/usuarios/:id", async (req, res) => {
     if (!nombre || !email || !rol) {
       return res.status(400).json({ error: "Faltan campos obligatorios" });
     }
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({ error: "El correo no tiene un formato válido" });
+    }
+    if (password && password.length < PASSWORD_MIN_LENGTH) {
+      return res.status(400).json({ error: `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres` });
+    }
 
     if (password) {
       const hash = await bcrypt.hash(password, 10);
@@ -106,6 +121,13 @@ app.put("/api/auth/usuarios/:id/perfil", async (req, res) => {
   try {
     const { email, password_actual, password_nueva, foto_url } = req.body;
     const cambiaCredenciales = Boolean(email) || Boolean(password_nueva);
+
+    if (email && !EMAIL_REGEX.test(email)) {
+      return res.status(400).json({ error: "El correo no tiene un formato válido" });
+    }
+    if (password_nueva && password_nueva.length < PASSWORD_MIN_LENGTH) {
+      return res.status(400).json({ error: `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres` });
+    }
 
     const [rows] = await pool.query("SELECT * FROM usuarios WHERE id = ?", [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });

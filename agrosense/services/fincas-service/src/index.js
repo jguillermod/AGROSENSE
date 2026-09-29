@@ -143,6 +143,30 @@ app.get("/api/parcelas", async (req, res) => {
   res.json(rows);
 });
 
+// Parcelas asignadas a un usuario (rol agrónomo): mismo detalle que el
+// listado por finca (última lectura + estado calculado), pero cruzando
+// primero por sus asignaciones en usuario_parcelas en vez de por finca_id.
+// Es lo que le da al agrónomo acceso solo a lo que el admin le asignó.
+app.get("/api/usuarios/:usuarioId/parcelas", async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT p.*, f.nombre AS finca_nombre,
+            ult.humedad_suelo AS humedad_actual, ult.temperatura AS temperatura_actual
+     FROM usuario_parcelas up
+     JOIN parcelas p ON p.id = up.parcela_id
+     JOIN fincas f ON f.id = p.finca_id
+     LEFT JOIN (
+       SELECT e.parcela_id, l.humedad_suelo, l.temperatura,
+              ROW_NUMBER() OVER (PARTITION BY e.parcela_id ORDER BY l.fecha DESC) AS rn
+       FROM estaciones e
+       JOIN lecturas l ON l.estacion_id = e.id
+     ) ult ON ult.parcela_id = p.id AND ult.rn = 1
+     WHERE up.usuario_id = ?
+     ORDER BY f.nombre, p.nombre`,
+    [req.params.usuarioId]
+  );
+  res.json(rows.map((p) => ({ ...p, estado: calcularEstado(p) })));
+});
+
 // --- Asignación de parcelas a usuarios (RF-08) ---
 app.get("/api/asignaciones", async (req, res) => {
   const [rows] = await pool.query(
@@ -156,7 +180,7 @@ app.get("/api/asignaciones", async (req, res) => {
 
 app.get("/api/asignaciones/:usuarioId", async (req, res) => {
   const [rows] = await pool.query(
-    `SELECT up.parcela_id, p.nombre AS parcela_nombre, f.nombre AS finca_nombre
+    `SELECT up.usuario_id, up.parcela_id, p.nombre AS parcela_nombre, f.nombre AS finca_nombre
      FROM usuario_parcelas up
      JOIN parcelas p ON p.id = up.parcela_id
      JOIN fincas f ON f.id = p.finca_id

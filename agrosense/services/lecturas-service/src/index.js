@@ -90,6 +90,74 @@ app.get("/api/parcelas/:parcelaId/alertas", async (req, res) => {
   res.json(rows);
 });
 
+// --- Registros manuales de campo (humedad/temperatura a ojo + anotaciones) ---
+// Puede registrar el admin (en cualquier parcela) o quien tenga esa
+// parcela asignada en usuario_parcelas (agrónomo, o cualquier usuario al
+// que se la hayan asignado).
+async function puedeRegistrarEnParcela(usuarioId, parcelaId) {
+  const [usuarios] = await pool.query("SELECT rol FROM usuarios WHERE id = ?", [usuarioId]);
+  if (usuarios.length === 0) return false;
+  if (usuarios[0].rol !== "agronomo") return true; // admin/agricultor: mismo acceso amplio que ya tienen sobre parcelas
+  const [asignaciones] = await pool.query(
+    "SELECT 1 FROM usuario_parcelas WHERE usuario_id = ? AND parcela_id = ?",
+    [usuarioId, parcelaId]
+  );
+  return asignaciones.length > 0;
+}
+
+app.get("/api/parcelas/:parcelaId/registros", async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT r.*, u.nombre AS usuario_nombre
+     FROM registros_manuales r
+     JOIN usuarios u ON u.id = r.usuario_id
+     WHERE r.parcela_id = ?
+     ORDER BY r.fecha DESC
+     LIMIT 100`,
+    [req.params.parcelaId]
+  );
+  res.json(rows);
+});
+
+app.post("/api/parcelas/:parcelaId/registros", async (req, res) => {
+  const parcelaId = Number(req.params.parcelaId);
+  const { usuario_id, humedad_suelo, temperatura, anotaciones } = req.body;
+
+  if (!usuario_id) return res.status(400).json({ error: "Falta usuario_id" });
+  const sinValores = humedad_suelo === undefined && temperatura === undefined;
+  const sinAnotacion = !anotaciones || !String(anotaciones).trim();
+  if (sinValores && sinAnotacion) {
+    return res.status(400).json({ error: "Registra al menos un valor o una anotación" });
+  }
+
+  try {
+    const permitido = await puedeRegistrarEnParcela(usuario_id, parcelaId);
+    if (!permitido) {
+      return res.status(403).json({ error: "No tienes esta parcela asignada" });
+    }
+
+    const [result] = await pool.query(
+      `INSERT INTO registros_manuales (parcela_id, usuario_id, humedad_suelo, temperatura, anotaciones)
+       VALUES (?, ?, ?, ?, ?)`,
+      [parcelaId, usuario_id, humedad_suelo ?? null, temperatura ?? null, anotaciones ?? null]
+    );
+
+    const [[usuario]] = await pool.query("SELECT nombre FROM usuarios WHERE id = ?", [usuario_id]);
+    res.status(201).json({
+      id: result.insertId,
+      parcela_id: parcelaId,
+      usuario_id,
+      usuario_nombre: usuario?.nombre ?? null,
+      humedad_suelo: humedad_suelo ?? null,
+      temperatura: temperatura ?? null,
+      anotaciones: anotaciones ?? null,
+      fecha: new Date(),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "No se pudo guardar el registro" });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`lecturas-service escuchando en puerto ${PORT}`);
