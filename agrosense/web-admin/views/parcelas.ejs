@@ -52,6 +52,7 @@
                 'Óptimo': 'badge--success',
                 'Riesgo de hongos': 'badge--danger',
                 'Riesgo por calor': 'badge--danger',
+                'Riesgo de helada': 'badge--danger',
                 'Sin datos': 'badge--neutral',
               }[p.estado] || 'badge--neutral';
             %>
@@ -69,6 +70,7 @@
                       data-id="<%= p.id %>" data-nombre="<%= p.nombre %>"
                       data-humedad-min="<%= p.humedad_min %>" data-humedad-max="<%= p.humedad_max %>"
                       data-temperatura-max="<%= p.temperatura_max %>"
+                      data-temperatura-min="<%= p.temperatura_min != null ? p.temperatura_min : '' %>"
                       onclick="abrirEditarParcela(this)">
                       <i class="bi bi-pencil-fill"></i> Editar
                     </button>
@@ -111,6 +113,11 @@
           <input type="number" step="0.1" name="temperatura_max" id="nueva-temperatura-max" placeholder="Ej. 38">
           <p class="form-field-hint">Arriba de este valor se genera la alerta "Riesgo de estrés hídrico por calor".</p>
         </div>
+        <div class="form-field">
+          <label for="nueva-temperatura-min">Temperatura mínima (°C)</label>
+          <input type="number" step="0.1" name="temperatura_min" id="nueva-temperatura-min" placeholder="Ej. 5">
+          <p class="form-field-hint">Debajo de este valor se genera la alerta "Riesgo de helada", y si el pronóstico la anticipa, "Pronóstico de helada". Si lo dejas vacío se usa 5 °C.</p>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn-secondary" onclick="document.getElementById('modal-parcela').classList.remove('open')">Cancelar</button>
           <button type="submit" class="btn-primary">Guardar</button>
@@ -143,6 +150,11 @@
           <input type="number" step="0.1" name="temperatura_max" id="editar-temperatura-max" placeholder="Ej. 38">
           <p class="form-field-hint">Arriba de este valor se genera la alerta "Riesgo de estrés hídrico por calor".</p>
         </div>
+        <div class="form-field">
+          <label for="editar-temperatura-min">Temperatura mínima (°C)</label>
+          <input type="number" step="0.1" name="temperatura_min" id="editar-temperatura-min" placeholder="Ej. 5">
+          <p class="form-field-hint">Debajo de este valor se genera la alerta "Riesgo de helada", y si el pronóstico la anticipa, "Pronóstico de helada". Si lo dejas vacío se usa 5 °C.</p>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn-secondary" onclick="document.getElementById('modal-editar-parcela').classList.remove('open')">Cancelar</button>
           <button type="submit" class="btn-primary">Guardar cambios</button>
@@ -164,6 +176,7 @@
       document.getElementById('editar-humedad-min').value = btn.dataset.humedadMin;
       document.getElementById('editar-humedad-max').value = btn.dataset.humedadMax;
       document.getElementById('editar-temperatura-max').value = btn.dataset.temperaturaMax;
+      document.getElementById('editar-temperatura-min').value = btn.dataset.temperaturaMin;
       document.getElementById('modal-editar-parcela').classList.add('open');
     }
   </script>

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <%- include('partials/head', { titulo: 'Alertas' }) %>
+</head>
+<body>
+  <%
+    const BADGE_SEVERIDAD = { alta: 'sev--alta', media: 'sev--media', info: 'sev--info' };
+    const BADGE_ESTADO = { activa: 'badge--danger', atendida: 'badge--warning', resuelta: 'badge--success' };
+    const TEXTO_ESTADO = { activa: 'Activa', atendida: 'Atendida', resuelta: 'Resuelta' };
+    const hayFiltros = filtros.finca || filtros.parcela || filtros.categoria || filtros.severidad || filtros.estado !== 'vigentes';
+  %>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
+
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Alertas</h2>
+          <p class="page-subtitle">
+            <strong><%= conteo.activas %></strong> sin atender
+            (<span class="text-alerta"><%= conteo.por_severidad.alta %> alta<%= conteo.por_severidad.alta === 1 ? '' : 's' %></span>,
+            <%= conteo.por_severidad.media %> media<%= conteo.por_severidad.media === 1 ? '' : 's' %>,
+            <%= conteo.por_severidad.info %> info) · <%= conteo.atendidas %> atendida<%= conteo.atendidas === 1 ? '' : 's' %> en seguimiento
+            <%= locals.usuario && locals.usuario.rol === 'agronomo' ? '· solo tus parcelas asignadas' : '' %>
+          </p>
+        </div>
+      </div>
+
+      <% if (error) { %>
+        <p class="auth-message auth-message--error"><%= error %></p>
+      <% } %>
+
+      <form class="filter-bar" method="GET" action="/alertas" id="form-filtros">
+        <div class="form-field">
+          <label for="f-finca">Finca</label>
+          <select class="finca-select" name="finca" id="f-finca">
+            <option value="">Todas</option>
+            <% fincas.forEach(f => { %>
+              <option value="<%= f.id %>" <%= String(f.id) === filtros.finca ? 'selected' : '' %>><%= f.nombre %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="f-parcela">Parcela</label>
+          <select class="finca-select" name="parcela" id="f-parcela">
+            <option value="">Todas</option>
+            <% parcelas.forEach(p => { %>
+              <option value="<%= p.id %>" data-finca="<%= p.finca_id %>" <%= String(p.id) === filtros.parcela ? 'selected' : '' %>><%= p.nombre %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="f-categoria">Categoría</label>
+          <select class="finca-select" name="categoria" id="f-categoria">
+            <option value="">Todas</option>
+            <option value="sensor" <%= filtros.categoria === 'sensor' ? 'selected' : '' %>>Sensores</option>
+            <option value="climatica" <%= filtros.categoria === 'climatica' ? 'selected' : '' %>>Clima</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="f-severidad">Severidad</label>
+          <select class="finca-select" name="severidad" id="f-severidad">
+            <option value="">Todas</option>
+            <% Object.entries(severidades).forEach(([valor, texto]) => { %>
+              <option value="<%= valor %>" <%= valor === filtros.severidad ? 'selected' : '' %>><%= texto %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="f-estado">Estado</label>
+          <select class="finca-select" name="estado" id="f-estado">
+            <% Object.entries(estados).forEach(([valor, texto]) => { %>
+              <option value="<%= valor %>" <%= valor === filtros.estado ? 'selected' : '' %>><%= texto %></option>
+            <% }) %>
+            <option value="" <%= filtros.estado === '' ? 'selected' : '' %>>Todas</option>
+          </select>
+        </div>
+        <% if (hayFiltros) { %>
+          <a class="filter-clear" href="/alertas"><i class="bi bi-x-circle"></i> Limpiar filtros</a>
+        <% } %>
+      </form>
+
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Severidad</th><th>Alerta</th><th>Parcela</th><th>Desde</th><th>Última vez</th><th>Estado</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% if (alertas.length === 0) { %>
+              <tr><td colspan="7" class="data-table-empty">
+                <%= filtros.estado === 'vigentes' && !hayFiltros ? 'No hay alertas vigentes. Todo en orden.' : 'No hay alertas con estos filtros.' %>
+              </td></tr>
+            <% } %>
+            <% alertas.forEach(a => { %>
+              <tr class="<%= a.estado === 'resuelta' ? 'fila-apagada' : '' %>">
+                <td><span class="sev <%= BADGE_SEVERIDAD[a.severidad] %>"><%= severidades[a.severidad] %></span></td>
+                <td>
+                  <strong><%= a.tipo %></strong>
+                  <div class="cell-sub">
+                    <i class="bi <%= a.categoria === 'climatica' ? 'bi-cloud-sun' : 'bi-broadcast' %>"></i>
+                    <%= a.categoria === 'climatica' ? 'Clima' : 'Sensor' + (a.estacion_codigo ? ' ' + a.estacion_codigo : '') %>
+                    <% if (a.detalle) { %>· <%= a.detalle %><% } %>
+                  </div>
+                </td>
+                <td><%= a.parcela_nombre %><div class="cell-sub"><%= a.finca_nombre %></div></td>
+                <td><span data-fecha="<%= a.fecha %>"></span></td>
+                <td>
+                  <span data-fecha="<%= a.ultima_lectura_en || a.fecha %>"></span>
+                  <% if (a.repeticiones > 1) { %><div class="cell-sub"><%= a.repeticiones %> veces</div><% } %>
+                </td>
+                <td>
+                  <span class="badge <%= BADGE_ESTADO[a.estado] %>"><%= TEXTO_ESTADO[a.estado] %></span>
+                  <% if (a.estado === 'atendida' || (a.atendida_por_nombre && a.estado === 'resuelta')) { %>
+                    <div class="cell-sub">por <%= a.atendida_por_nombre || '—' %></div>
+                  <% } %>
+                  <% if (a.estado === 'resuelta' && a.resuelta_en) { %>
+                    <div class="cell-sub">resuelta <span data-fecha="<%= a.resuelta_en %>"></span></div>
+                  <% } %>
+                </td>
+                <td>
+                  <% if (a.estado === 'activa') { %>
+                    <form method="POST" action="/alertas/<%= a.id %>/atender">
+                      <input type="hidden" name="volver" value="<%= volver %>">
+                      <button type="submit" class="btn-secondary btn-sm"><i class="bi bi-check2-circle"></i> Marcar como atendida</button>
+                    </form>
+                  <% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <p class="live-legend">
+        <strong>Activa</strong>: nadie la ha visto todavía. <strong>Atendida</strong>: alguien se hizo cargo; sigue abierta mientras dure el problema.
+        <strong>Resuelta</strong>: la condición terminó (se cierra sola). Cada alerta se actualiza mientras dura, en vez de repetirse en cada lectura.
+      </p>
+    </main>
+  </div>
+
+  <script>
+    // Fechas en la hora local del navegador
+    document.querySelectorAll('[data-fecha]').forEach((el) => {
+      const d = new Date(el.dataset.fecha);
+      if (!isNaN(d)) el.textContent = d.toLocaleString('es-GT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    });
+
+    // Los filtros se aplican al instante; la parcela se limita a la finca elegida
+    const form = document.getElementById('form-filtros');
+    const finca = document.getElementById('f-finca');
+    const parcela = document.getElementById('f-parcela');
+    [...parcela.options].forEach((o) => { if (o.value) o.hidden = finca.value !== '' && o.dataset.finca !== finca.value; });
+    finca.addEventListener('change', () => {
+      const elegida = parcela.selectedOptions[0];
+      if (finca.value && elegida && elegida.value && elegida.dataset.finca !== finca.value) parcela.value = '';
+      form.submit();
+    });
+    ['f-parcela', 'f-categoria', 'f-severidad', 'f-estado'].forEach((id) => document.getElementById(id).addEventListener('change', () => form.submit()));
+  </script>
+</body>
+</html>

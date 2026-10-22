@@ -21,11 +21,18 @@
           <div class="stat-value"><%= resumen.estaciones_activas || 0 %></div>
           <div class="stat-label">Estaciones activas</div>
         </div>
-        <div class="stat-card stat-card--amber">
-          <i class="bi bi-exclamation-triangle-fill stat-icon"></i>
-          <div class="stat-value"><%= resumen.alertas_hoy || 0 %></div>
-          <div class="stat-label">Alertas hoy</div>
-        </div>
+        <a href="/alertas" class="stat-card stat-card--amber stat-card--link">
+          <i class="bi bi-bell-fill stat-icon"></i>
+          <div class="stat-value"><%= conteoAlertas ? conteoAlertas.activas : '—' %></div>
+          <div class="stat-label">Alertas activas</div>
+          <% if (conteoAlertas) { %>
+            <div class="stat-desglose">
+              <span title="Severidad alta"><i class="bi bi-circle-fill sev-punto--alta"></i> <%= conteoAlertas.por_severidad.alta %></span>
+              <span title="Severidad media"><i class="bi bi-circle-fill sev-punto--media"></i> <%= conteoAlertas.por_severidad.media %></span>
+              <span title="Informativas"><i class="bi bi-circle-fill sev-punto--info"></i> <%= conteoAlertas.por_severidad.info %></span>
+            </div>
+          <% } %>
+        </a>
         <div class="stat-card stat-card--teal">
           <i class="bi bi-droplet-fill stat-icon"></i>
           <div class="stat-value"><%= resumen.humedad_promedio != null ? resumen.humedad_promedio + '%' : '—' %></div>
@@ -46,6 +53,63 @@
           <div class="stat-value"><%= resumen.riegos_en_curso || 0 %></div>
           <div class="stat-label">Riegos en curso</div>
         </a>
+        <% if (esAdmin) {
+          const ultimo = respaldo && respaldo.ultimo;
+          const horas = ultimo ? (Date.now() - new Date(ultimo.fecha).getTime()) / 3600000 : null;
+          const viejo = !ultimo || horas > 48;
+          const hace = horas === null ? 'Nunca' : horas < 1 ? 'Hace ' + Math.max(1, Math.round(horas * 60)) + ' min' : horas < 48 ? 'Hace ' + Math.round(horas) + ' h' : 'Hace ' + Math.round(horas / 24) + ' días';
+        %>
+          <a href="/respaldos" class="stat-card <%= viejo ? 'stat-card--red' : 'stat-card--slate' %> stat-card--link" title="<%= ultimo ? ultimo.nombre : 'Sin respaldos' %>">
+            <i class="bi <%= viejo ? 'bi-exclamation-octagon-fill' : 'bi-database-check' %> stat-icon"></i>
+            <div class="stat-value stat-value--texto"><%= respaldo ? hace : '—' %></div>
+            <div class="stat-label">Último respaldo<%= viejo && respaldo ? ' · más de 48 h' : '' %><%= !respaldo ? ' · servicio sin respuesta' : '' %></div>
+          </a>
+        <% } %>
+      </div>
+
+      <%
+        const ICONO_CLIMA = { 'Despejado': 'bi-sun-fill', 'Noche despejada': 'bi-moon-stars-fill', 'Lluvia': 'bi-cloud-rain-heavy-fill',
+          'Helada': 'bi-snow', 'Ola de calor': 'bi-thermometer-sun', 'Viento fuerte': 'bi-wind' };
+        const NOMBRE_EVENTO = { lluvia: 'Lluvia', helada: 'Helada', ola_calor: 'Ola de calor', viento: 'Viento fuerte' };
+        const hhmm = (v) => String(v).slice(11, 16);
+      %>
+      <div class="clima-panel">
+        <h3><i class="bi bi-cloud-sun-fill"></i> Clima<% if (clima && clima.finca) { %> · <%= clima.finca.nombre %><% } %></h3>
+        <% if (!clima) { %>
+          <p class="panel-empty-claro">Sin datos de clima en este momento (el proveedor de clima no responde).</p>
+        <% } else { const a = clima.ahora; const proximos = clima.pronostico.filter((_, i) => i % 2 === 1).slice(0, 6); %>
+          <div class="clima-cuerpo">
+            <div class="clima-ahora">
+              <i class="bi <%= ICONO_CLIMA[a.condicion] || 'bi-cloud' %> clima-icono"></i>
+              <div>
+                <div class="clima-temp"><%= Math.round(a.temperatura) %>°C</div>
+                <div class="clima-cond"><%= a.condicion %> · <%= hhmm(a.fecha_hora) %></div>
+                <div class="cell-sub"><i class="bi bi-droplet"></i> <%= a.lluvia_mm %> mm/h · <i class="bi bi-wind"></i> <%= a.viento_kmh %> km/h</div>
+              </div>
+            </div>
+            <div class="clima-pronostico">
+              <% proximos.forEach(h => { %>
+                <div class="clima-hora <%= h.evento ? 'clima-hora--evento' : '' %>">
+                  <span><%= hhmm(h.fecha_hora) %></span>
+                  <i class="bi <%= ICONO_CLIMA[h.condicion] || 'bi-cloud' %>"></i>
+                  <strong><%= Math.round(h.temperatura) %>°</strong>
+                  <% if (h.lluvia_mm > 0) { %><small><%= h.lluvia_mm %> mm</small><% } %>
+                </div>
+              <% }) %>
+            </div>
+          </div>
+          <p class="clima-nota">
+            <% const evs = (clima.eventos || []); %>
+            <% if (evs.length) { %>
+              <% evs.forEach(e => { %>
+                <span class="badge <%= e.en_curso ? 'badge--danger' : 'badge--warning' %>"><%= NOMBRE_EVENTO[e.tipo] || e.tipo %>: <%= e.en_curso ? 'en curso hasta' : 'desde' %> <%= hhmm(e.en_curso ? e.hasta : e.desde) %></span>
+              <% }) %>
+            <% } else { %>
+              Sin eventos de riesgo en las próximas 24 h.
+            <% } %>
+            <span class="cell-sub">Horas del reloj de la simulación.</span>
+          </p>
+        <% } %>
       </div>
 
       <div class="panel-dark">

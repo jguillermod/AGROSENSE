@@ -19,8 +19,8 @@
     const soloHora = (v) => (v ? partes(v).h : '—');
     const ORIGENES = { programado: 'Programado', manual: 'Manual', automatico: 'Automático' };
     const BADGE_ORIGEN = { programado: 'badge--info', manual: 'badge--neutral', automatico: 'badge--success' };
-    const ESTADOS = { en_curso: 'En curso', completado: 'Completado', cancelado: 'Detenido' };
-    const BADGE_ESTADO = { en_curso: 'badge--info', completado: 'badge--success', cancelado: 'badge--warning' };
+    const ESTADOS = { en_curso: 'En curso', completado: 'Completado', cancelado: 'Detenido', omitido: 'Omitido' };
+    const BADGE_ESTADO = { en_curso: 'badge--info', completado: 'badge--success', cancelado: 'badge--warning', omitido: 'badge--neutral' };
     const relojTexto = reloj ? (() => { const p = partes(reloj.fecha_hora); return `${DIAS_LARGOS[p.dia]} ${p.d} ${MESES[p.m - 1]}, ${p.h}`; })() : null;
   %>
   <div class="app-shell">
@@ -247,9 +247,12 @@
                     <% if (e.programacion_nombre) { %><div class="cell-sub"><%= e.programacion_nombre %></div><% } %>
                   </td>
                   <td><%= fechaHora(e.inicio) %></td>
-                  <td><%= e.fin ? fechaHora(e.fin) : 'previsto ' + soloHora(e.fin_previsto) %></td>
+                  <td><%= e.estado === 'omitido' ? '—' : e.fin ? fechaHora(e.fin) : 'previsto ' + soloHora(e.fin_previsto) %></td>
                   <td><%= e.duracion_minutos %> min</td>
-                  <td><span class="badge <%= BADGE_ESTADO[e.estado] %>"><%= ESTADOS[e.estado] %></span></td>
+                  <td>
+                    <span class="badge <%= BADGE_ESTADO[e.estado] %>"><%= ESTADOS[e.estado] %></span>
+                    <% if (e.motivo) { %><div class="cell-sub"><%= e.motivo %></div><% } %>
+                  </td>
                 </tr>
               <% }) %>
             </tbody>

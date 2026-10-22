@@ -25,9 +25,16 @@
     <a href="/lecturas" class="<%= active === 'lecturas' ? 'active' : '' %>">
       <i class="bi bi-activity"></i> Lecturas en vivo
     </a>
+    <a href="/alertas" class="<%= active === 'alertas' ? 'active' : '' %>">
+      <i class="bi bi-bell-fill"></i> Alertas
+      <span class="menu-badge" id="insignia-alertas" hidden title="Alertas activas sin atender"></span>
+    </a>
     <% if (usuario && usuario.rol === 'admin') { %>
       <a href="/usuarios" class="<%= active === 'usuarios' ? 'active' : '' %>">
         <i class="bi bi-people-fill"></i> Usuarios
+      </a>
+      <a href="/respaldos" class="<%= active === 'respaldos' ? 'active' : '' %>">
+        <i class="bi bi-database-fill-lock"></i> Respaldos
       </a>
     <% } %>
   </nav>
@@ -43,3 +50,21 @@
     <a href="/logout"><i class="bi bi-box-arrow-right"></i> Cerrar sesión</a>
   </div>
 </aside>
+<script>
+  // Insignia de alertas activas (sin atender) en el menú; se refresca cada 30 s
+  (function () {
+    const insignia = document.getElementById('insignia-alertas');
+    async function actualizar() {
+      try {
+        const res = await fetch('/alertas/conteo', { headers: { Accept: 'application/json' } });
+        if (!res.ok || !(res.headers.get('content-type') || '').includes('application/json')) return;
+        const c = await res.json();
+        insignia.hidden = c.activas === 0;
+        insignia.textContent = c.activas > 99 ? '99+' : c.activas;
+        insignia.classList.toggle('menu-badge--alta', c.por_severidad.alta > 0);
+      } catch (e) { /* sin conexión: se reintenta */ }
+    }
+    actualizar();
+    setInterval(actualizar, 30000);
+  })();
+</script>

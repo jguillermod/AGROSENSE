@@ -17,6 +17,13 @@ app.use(cookieParser());
 const AUTH_URL = process.env.AUTH_SERVICE_URL;
 const FINCAS_URL = process.env.FINCAS_SERVICE_URL;
 const LECTURAS_URL = process.env.LECTURAS_SERVICE_URL;
+const BACKUP_URL = process.env.BACKUP_SERVICE_URL || "http://backup-service:3000";
+const ZONA_HORARIA = process.env.APP_TIMEZONE || "America/Guatemala";
+// backup-service puede exigir un token propio (BACKUP_API_TOKEN); el panel lo reenvía
+const backupApi = axios.create({
+  baseURL: BACKUP_URL,
+  headers: process.env.BACKUP_API_TOKEN ? { "x-backup-token": process.env.BACKUP_API_TOKEN } : {},
+});
 
 const AVATARS_DIR = path.join(__dirname, "../public/uploads/avatars");
 fs.mkdirSync(AVATARS_DIR, { recursive: true });
@@ -141,19 +148,33 @@ app.post("/register", async (req, res) => {
   }
 });
 
+// Datos opcionales del dashboard: si un servicio no responde, su tarjeta
+// muestra "sin datos" en vez de tumbar toda la página.
+const opcional = (promesa) => promesa.then((r) => r.data).catch(() => null);
+
 app.get("/dashboard", requireAuth, async (req, res) => {
+  const esAdmin = req.usuario.rol === "admin";
+  const [conteoAlertas, clima, respaldo] = await Promise.all([
+    opcional(axios.get(`${LECTURAS_URL}/api/alertas/conteo`, { params: { usuario_id: req.usuario.id } })),
+    opcional(axios.get(`${LECTURAS_URL}/api/clima`)),
+    esAdmin ? opcional(backupApi.get("/backups/config")) : Promise.resolve(null),
+  ]);
   try {
     const [{ data: resumen }, { data: historial }] = await Promise.all([
       axios.get(`${FINCAS_URL}/api/dashboard/resumen`, { params: { usuario_id: req.usuario.id } }),
       axios.get(`${FINCAS_URL}/api/dashboard/humedad-historial?dias=7`),
     ]);
-    res.render("dashboard", { active: "dashboard", resumen, historial });
+    res.render("dashboard", { active: "dashboard", resumen, historial, conteoAlertas, clima, respaldo, esAdmin });
   } catch (err) {
     console.error(err.message);
     res.render("dashboard", {
       active: "dashboard",
       resumen: { estaciones_activas: 0, alertas_hoy: 0, humedad_promedio: 0, temperatura_promedio: 0, cultivos_activos: 0, riegos_en_curso: 0 },
       historial: [],
+      conteoAlertas,
+      clima,
+      respaldo,
+      esAdmin,
     });
   }
 });
@@ -228,7 +249,7 @@ app.get("/parcelas", requireAuth, async (req, res) => {
 });
 
 app.post("/parcelas", requireAuth, async (req, res) => {
-  const { nombre, finca_id, humedad_min, humedad_max, temperatura_max } = req.body;
+  const { nombre, finca_id, humedad_min, humedad_max, temperatura_max, temperatura_min } = req.body;
   try {
     await axios.post(`${FINCAS_URL}/api/parcelas`, {
       nombre,
@@ -236,6 +257,7 @@ app.post("/parcelas", requireAuth, async (req, res) => {
       humedad_min,
       humedad_max,
       temperatura_max,
+      temperatura_min,
     });
     res.redirect(`/parcelas?finca=${finca_id}`);
   } catch (err) {
@@ -246,13 +268,14 @@ app.post("/parcelas", requireAuth, async (req, res) => {
 });
 
 app.post("/parcelas/:id/editar", requireAuth, async (req, res) => {
-  const { nombre, humedad_min, humedad_max, temperatura_max, finca_id } = req.body;
+  const { nombre, humedad_min, humedad_max, temperatura_max, temperatura_min, finca_id } = req.body;
   try {
     await axios.put(`${FINCAS_URL}/api/parcelas/${req.params.id}`, {
       nombre,
       humedad_min,
       humedad_max,
       temperatura_max,
+      temperatura_min,
     });
     res.redirect(`/parcelas?finca=${finca_id}`);
   } catch (err) {
@@ -672,6 +695,100 @@ app.post("/sensores/:id/eliminar", requireAuth, requireAdmin, async (req, res) =
   }
 });
 
+// --- Alertas (sensor y climáticas) ---
+// Mismos permisos que cultivos y riego: el agrónomo solo ve y atiende las
+// de sus parcelas asignadas (lecturas-service aplica la regla con usuario_id).
+
+const SEVERIDADES_ALERTA = { alta: "Alta", media: "Media", info: "Info" };
+const ESTADOS_ALERTA = { vigentes: "Vigentes (activas y atendidas)", activa: "Activas", atendida: "Atendidas", resuelta: "Resueltas" };
+
+function filtrosAlertas(fuente) {
+  return {
+    finca: fuente.finca || "",
+    parcela: fuente.parcela || "",
+    categoria: fuente.categoria || "",
+    severidad: fuente.severidad || "",
+    estado: fuente.estado === undefined ? "vigentes" : fuente.estado,
+  };
+}
+
+function urlAlertas(filtros) {
+  const query = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v !== undefined)).toString();
+  return query ? `/alertas?${query}` : "/alertas";
+}
+
+async function cargarAlertasView(usuario, filtros, extra = {}) {
+  const params = { usuario_id: usuario.id, limit: 300 };
+  if (filtros.finca) params.finca_id = filtros.finca;
+  if (filtros.parcela) params.parcela_id = filtros.parcela;
+  if (filtros.categoria) params.categoria = filtros.categoria;
+  if (filtros.severidad) params.severidad = filtros.severidad;
+  if (filtros.estado) params.estado = filtros.estado;
+  const [parcelas, { data: alertas }, { data: conteo }] = await Promise.all([
+    parcelasDisponibles(usuario),
+    axios.get(`${LECTURAS_URL}/api/alertas`, { params }),
+    axios.get(`${LECTURAS_URL}/api/alertas/conteo`, { params: { usuario_id: usuario.id } }),
+  ]);
+  const fincas = [];
+  parcelas.forEach((p) => {
+    if (!fincas.some((f) => f.id === p.finca_id)) fincas.push({ id: p.finca_id, nombre: p.finca_nombre });
+  });
+  return {
+    active: "alertas",
+    alertas,
+    conteo,
+    parcelas,
+    fincas,
+    filtros,
+    volver: urlAlertas(filtros),
+    severidades: SEVERIDADES_ALERTA,
+    estados: ESTADOS_ALERTA,
+    error: null,
+    ...extra,
+  };
+}
+
+app.get("/alertas", requireAuth, async (req, res) => {
+  const filtros = filtrosAlertas(req.query);
+  try {
+    res.render("alertas", await cargarAlertasView(req.usuario, filtros));
+  } catch (err) {
+    console.error(err.message);
+    res.render("alertas", {
+      active: "alertas", alertas: [], conteo: { activas: 0, atendidas: 0, por_severidad: { alta: 0, media: 0, info: 0 } },
+      parcelas: [], fincas: [], filtros, volver: urlAlertas(filtros), severidades: SEVERIDADES_ALERTA,
+      estados: ESTADOS_ALERTA, error: "No se pudieron cargar las alertas",
+    });
+  }
+});
+
+// Insignia del menú (la pide el navegador desde cualquier página)
+app.get("/alertas/conteo", requireAuth, async (req, res) => {
+  try {
+    const { data } = await axios.get(`${LECTURAS_URL}/api/alertas/conteo`, { params: { usuario_id: req.usuario.id } });
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: "No se pudo contar las alertas" });
+  }
+});
+
+app.post("/alertas/:id/atender", requireAuth, async (req, res) => {
+  const volver = typeof req.body.volver === "string" && /^\/alertas(\?|$)/.test(req.body.volver) ? req.body.volver : "/alertas";
+  try {
+    await axios.put(`${LECTURAS_URL}/api/alertas/${req.params.id}/atender`, { usuario_id: req.usuario.id });
+    res.redirect(volver);
+  } catch (err) {
+    console.error(err.message);
+    const filtros = filtrosAlertas(Object.fromEntries(new URL(volver, "http://x").searchParams));
+    const mensaje = err.response?.data?.error || "No se pudo marcar la alerta como atendida";
+    try {
+      res.render("alertas", await cargarAlertasView(req.usuario, filtros, { error: mensaje }));
+    } catch (e) {
+      res.redirect(volver);
+    }
+  }
+});
+
 // --- Lecturas en vivo ---
 // La página carga el selector de finca/parcela y luego el navegador pide
 // /lecturas/datos cada pocos segundos (el lecturas-service no es accesible
@@ -694,7 +811,7 @@ app.get("/lecturas/datos", requireAuth, async (req, res) => {
   try {
     const [{ data: lecturas }, { data: alertas }, grafica] = await Promise.all([
       axios.get(`${LECTURAS_URL}/api/lecturas/recientes`, { params: { ...filtro, limit: 50 } }),
-      axios.get(`${LECTURAS_URL}/api/alertas/recientes`, { params: { ...filtro, limit: 20 } }),
+      axios.get(`${LECTURAS_URL}/api/alertas/recientes`, { params: { ...filtro, limit: 20, vigentes: 1 } }),
       // la gráfica solo se dibuja para una parcela concreta, con más puntos que la tabla
       filtro.parcela_id
         ? axios.get(`${LECTURAS_URL}/api/lecturas/recientes`, { params: { parcela_id: filtro.parcela_id, limit: 200 } })
@@ -735,6 +852,232 @@ async function cargarUsuariosView(extra = {}) {
     ...extra,
   };
 }
+
+// --- Respaldos y exportación de datos (solo admin) ---
+// Los respaldos contienen hashes de contraseñas y api_key_hash: solo el admin
+// puede crearlos, descargarlos, restaurarlos o borrarlos.
+
+const MENSAJES_RESPALDO = {
+  creado: "Respaldo creado",
+  restaurado: "Base restaurada. Antes se guardó un respaldo de seguridad del estado anterior",
+  eliminado: "Respaldo eliminado",
+};
+
+async function cargarRespaldosView(extra = {}) {
+  const [{ data: respaldos }, { data: config }, { data: parcelas }] = await Promise.all([
+    backupApi.get("/backups"),
+    backupApi.get("/backups/config"),
+    axios.get(`${FINCAS_URL}/api/parcelas`),
+  ]);
+  const fincas = [];
+  parcelas.forEach((p) => {
+    if (!fincas.some((f) => f.id === p.finca_id)) fincas.push({ id: p.finca_id, nombre: p.finca_nombre, parcelas: [] });
+    fincas.find((f) => f.id === p.finca_id).parcelas.push(p);
+  });
+  return { active: "respaldos", respaldos, config, fincas, mensaje: null, error: null, ...extra };
+}
+
+async function renderRespaldos(res, extra) {
+  try {
+    res.render("respaldos", await cargarRespaldosView(extra));
+  } catch (err) {
+    console.error(err.message);
+    res.render("respaldos", {
+      active: "respaldos", respaldos: [], config: null, fincas: [], mensaje: null,
+      error: extra.error || "No se pudo contactar al servicio de respaldos",
+    });
+  }
+}
+
+app.get("/respaldos", requireAuth, requireAdmin, async (req, res) => {
+  const mensaje = MENSAJES_RESPALDO[req.query.ok] ? `${MENSAJES_RESPALDO[req.query.ok]}${req.query.nombre ? `: ${req.query.nombre}` : ""}.` : null;
+  await renderRespaldos(res, { mensaje });
+});
+
+app.post("/respaldos", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { data } = await backupApi.post("/backups");
+    res.redirect(`/respaldos?ok=creado&nombre=${encodeURIComponent(data.nombre)}`);
+  } catch (err) {
+    console.error(err.message);
+    await renderRespaldos(res, { error: err.response?.data?.error || "No se pudo crear el respaldo" });
+  }
+});
+
+app.get("/respaldos/:nombre/descargar", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const respuesta = await backupApi.get(`/backups/${encodeURIComponent(req.params.nombre)}/descargar`, { responseType: "stream" });
+    res.set("Content-Type", "application/gzip");
+    res.set("Content-Disposition", `attachment; filename="${req.params.nombre.replace(/[^\w.-]/g, "")}"`);
+    respuesta.data.pipe(res);
+  } catch (err) {
+    console.error(err.message);
+    await renderRespaldos(res, { error: "No se pudo descargar el respaldo" });
+  }
+});
+
+// Restaurar exige escribir RESTAURAR (también se valida aquí, no solo en el navegador)
+app.post("/respaldos/:nombre/restaurar", requireAuth, requireAdmin, async (req, res) => {
+  if (req.body.confirmacion !== "RESTAURAR") {
+    return renderRespaldos(res, { error: "Para restaurar tienes que escribir RESTAURAR (en mayúsculas) en la confirmación." });
+  }
+  try {
+    const { data } = await backupApi.post(`/backups/${encodeURIComponent(req.params.nombre)}/restaurar`);
+    res.redirect(`/respaldos?ok=restaurado&nombre=${encodeURIComponent(data.seguridad)}`);
+  } catch (err) {
+    console.error(err.message);
+    await renderRespaldos(res, { error: err.response?.data?.error || "No se pudo restaurar el respaldo" });
+  }
+});
+
+app.post("/respaldos/:nombre/eliminar", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await backupApi.delete(`/backups/${encodeURIComponent(req.params.nombre)}`);
+    res.redirect(`/respaldos?ok=eliminado&nombre=${encodeURIComponent(req.params.nombre)}`);
+  } catch (err) {
+    console.error(err.message);
+    await renderRespaldos(res, { error: err.response?.data?.error || "No se pudo eliminar el respaldo" });
+  }
+});
+
+// --- Exportación CSV ---
+
+// Hora local (APP_TIMEZONE) para las columnas de fecha real (TIMESTAMP)
+function fechaLocal(valor) {
+  if (!valor) return "";
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return String(valor);
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: ZONA_HORARIA, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).format(fecha);
+}
+
+// CSV con BOM (para que Excel lea bien los acentos), comillas cuando hace falta
+// y protección contra inyección de fórmulas en celdas de texto
+function aCsv(columnas, filas) {
+  const celda = (v) => {
+    if (v === null || v === undefined) return "";
+    let texto = String(v);
+    if (typeof v === "string" && /^[=+\-@\t\r]/.test(texto) && Number.isNaN(Number(texto))) texto = `'${texto}`;
+    return /[",\r\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+  };
+  const lineas = [columnas.map(([titulo]) => titulo).join(",")];
+  filas.forEach((f) => lineas.push(columnas.map(([, valor]) => celda(valor(f))).join(",")));
+  return "\uFEFF" + lineas.join("\r\n") + "\r\n";
+}
+
+const EXPORTACIONES = {
+  lecturas: {
+    async cargar({ parcela, desde, hasta }) {
+      const r = await axios.get(`${LECTURAS_URL}/api/lecturas/exportar`, {
+        params: { parcela_id: parcela || undefined, desde: desde || undefined, hasta: hasta || undefined, limit: 50000 },
+      });
+      return { filas: r.data, truncado: r.headers["x-export-truncado"] };
+    },
+    columnas: [
+      ["fecha", (l) => fechaLocal(l.fecha)],
+      ["finca", (l) => l.finca_nombre],
+      ["parcela", (l) => l.parcela_nombre],
+      ["estacion", (l) => l.estacion_codigo],
+      ["humedad_suelo_pct", (l) => l.humedad_suelo],
+      ["temperatura_c", (l) => l.temperatura],
+      ["humedad_ambiental_pct", (l) => l.humedad_ambiental],
+    ],
+  },
+  alertas: {
+    async cargar({ parcela, desde, hasta }) {
+      const limite = 10000;
+      const r = await axios.get(`${LECTURAS_URL}/api/alertas`, {
+        params: { parcela_id: parcela || undefined, desde: desde || undefined, hasta: hasta || undefined, limit: limite },
+      });
+      return { filas: r.data, truncado: r.data.length === limite ? String(limite) : null };
+    },
+    columnas: [
+      ["inicio", (a) => fechaLocal(a.fecha)],
+      ["ultima_vez", (a) => fechaLocal(a.ultima_lectura_en)],
+      ["finca", (a) => a.finca_nombre],
+      ["parcela", (a) => a.parcela_nombre],
+      ["tipo", (a) => a.tipo],
+      ["categoria", (a) => a.categoria],
+      ["severidad", (a) => a.severidad],
+      ["estado", (a) => a.estado],
+      ["detalle", (a) => a.detalle],
+      ["repeticiones", (a) => a.repeticiones],
+      ["atendida_por", (a) => a.atendida_por_nombre],
+      ["atendida_en", (a) => fechaLocal(a.atendida_en)],
+      ["resuelta_en", (a) => fechaLocal(a.resuelta_en)],
+    ],
+  },
+  cultivos: {
+    // el rango de fechas se aplica a la fecha de siembra
+    async cargar({ parcela, desde, hasta }) {
+      const r = await axios.get(`${FINCAS_URL}/api/cultivos`, { params: { parcela_id: parcela || undefined } });
+      const filas = r.data.filter((c) => (!desde || c.fecha_siembra >= desde) && (!hasta || c.fecha_siembra <= hasta));
+      return { filas, truncado: null };
+    },
+    columnas: [
+      ["finca", (c) => c.finca_nombre],
+      ["parcela", (c) => c.parcela_nombre],
+      ["tipo", (c) => c.tipo],
+      ["variedad", (c) => c.variedad],
+      ["fecha_siembra", (c) => c.fecha_siembra],
+      ["fecha_cosecha_estimada", (c) => c.fecha_cosecha_estimada],
+      ["cantidad", (c) => c.cantidad],
+      ["unidad", (c) => c.unidad],
+      ["estado", (c) => c.estado],
+      ["notas", (c) => c.notas],
+    ],
+  },
+  riego: {
+    async cargar({ parcela, desde, hasta }) {
+      const limite = 5000;
+      const r = await axios.get(`${FINCAS_URL}/api/riego/eventos`, {
+        params: { parcela_id: parcela || undefined, desde: desde || undefined, hasta: hasta || undefined, limit: limite },
+      });
+      return { filas: r.data.slice().reverse(), truncado: r.data.length === limite ? String(limite) : null };
+    },
+    // inicio/fin están en el reloj del motor de riego (simulado durante la demo)
+    columnas: [
+      ["inicio", (e) => e.inicio],
+      ["fin", (e) => e.fin],
+      ["finca", (e) => e.finca_nombre],
+      ["parcela", (e) => e.parcela_nombre],
+      ["origen", (e) => e.origen],
+      ["programacion", (e) => e.programacion_nombre],
+      ["duracion_minutos", (e) => e.duracion_minutos],
+      ["estado", (e) => e.estado],
+      ["motivo", (e) => e.motivo],
+    ],
+  },
+};
+
+app.get("/respaldos/exportar", requireAuth, requireAdmin, async (req, res) => {
+  const tipo = req.query.tipo;
+  const exportacion = EXPORTACIONES[tipo];
+  const fechaOk = (v) => !v || /^\d{4}-\d{2}-\d{2}$/.test(v);
+  if (!exportacion || !fechaOk(req.query.desde) || !fechaOk(req.query.hasta)) {
+    return renderRespaldos(res, { error: "Elige qué datos exportar y fechas válidas." });
+  }
+  if (req.query.desde && req.query.hasta && req.query.desde > req.query.hasta) {
+    return renderRespaldos(res, { error: "La fecha \"desde\" no puede ser posterior a \"hasta\"." });
+  }
+  try {
+    const { filas, truncado } = await exportacion.cargar({
+      parcela: req.query.parcela,
+      desde: req.query.desde,
+      hasta: req.query.hasta,
+    });
+    const partes = ["agrosense", tipo, req.query.desde || "inicio", req.query.hasta || "hoy"];
+    if (truncado) partes.push(`primeras-${truncado}`);
+    res.set("Content-Type", "text/csv; charset=utf-8");
+    res.set("Content-Disposition", `attachment; filename="${partes.join("_")}.csv"`);
+    res.send(aCsv(exportacion.columnas, filas));
+  } catch (err) {
+    console.error(err.message);
+    await renderRespaldos(res, { error: "No se pudieron exportar los datos" });
+  }
+});
 
 app.get("/usuarios", requireAuth, requireAdmin, async (req, res) => {
   try {

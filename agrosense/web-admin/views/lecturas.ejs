@@ -62,7 +62,7 @@
         </div>
 
         <div class="live-alerts">
-          <h3><i class="bi bi-exclamation-triangle-fill"></i> Alertas recientes</h3>
+          <h3><i class="bi bi-exclamation-triangle-fill"></i> Alertas activas</h3>
           <ul class="live-alerts-list" id="lista-alertas">
             <li class="live-alerts-empty">Cargando…</li>
           </ul>
@@ -184,25 +184,23 @@
       }).join('');
     }
 
-    const BADGE_ALERTA = {
-      'Necesita riego': 'badge--warning',
-      'Riesgo de exceso de humedad': 'badge--danger',
-      'Riesgo de estrés hídrico por calor': 'badge--danger',
-    };
+    // Color por severidad (igual que la pantalla de Alertas)
+    const BADGE_SEVERIDAD = { alta: 'badge--danger', media: 'badge--warning', info: 'badge--info' };
 
     function pintarAlertas(alertas) {
       const ul = document.getElementById('lista-alertas');
       if (alertas.length === 0) {
-        ul.innerHTML = '<li class="live-alerts-empty">Sin alertas para esta selección.</li>';
+        ul.innerHTML = '<li class="live-alerts-empty">Sin alertas activas para esta selección.</li>';
         return;
       }
       ul.innerHTML = alertas.map((a) => `<li>
-          <span class="badge ${BADGE_ALERTA[a.tipo] || 'badge--neutral'}">${escapar(a.tipo)}</span>
+          <span class="badge ${BADGE_SEVERIDAD[a.severidad] || 'badge--neutral'}">${escapar(a.tipo)}</span>
           <div class="live-alert-meta">
-            <strong>${escapar(a.parcela_nombre)}</strong> · ${escapar(a.estacion_codigo)}
-            <span>${fechaHora(a.fecha)}</span>
+            <strong>${escapar(a.parcela_nombre)}</strong>${a.estacion_codigo ? ' · ' + escapar(a.estacion_codigo) : ' · clima'}
+            ${a.estado === 'atendida' ? ' · <em>atendida</em>' : ''}
+            <span>Desde ${fechaHora(a.fecha)}${a.repeticiones > 1 ? ' · ' + a.repeticiones + ' lecturas' : ''}</span>
           </div>
-        </li>`).join('');
+        </li>`).join('') + '<li class="live-alerts-empty"><a href="/alertas">Ver todas las alertas</a></li>';
     }
 
     function pintarGrafica(lecturas) {

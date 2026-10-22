@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <%- include('partials/head', { titulo: 'Respaldos' }) %>
+</head>
+<body>
+  <%
+    const tamano = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+  %>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
+
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Respaldos</h2>
+          <p class="page-subtitle">
+            <% if (config) { %>
+              Respaldo automático cada <%= config.intervalo_horas %> h · se conservan <%= config.retencion_dias %> días
+              · próximo: <span data-fecha="<%= config.proximo_automatico %>"></span>
+            <% } else { %>
+              El servicio de respaldos no responde.
+            <% } %>
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <form method="POST" action="/respaldos" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').innerHTML = 'Creando…';">
+            <button type="submit" class="btn-primary" <%= config ? '' : 'disabled' %>><i class="bi bi-database-add"></i> Crear respaldo ahora</button>
+          </form>
+        </div>
+      </div>
+
+      <% if (mensaje) { %>
+        <p class="auth-message auth-message--success"><%= mensaje %></p>
+      <% } %>
+      <% if (error) { %>
+        <p class="auth-message auth-message--error"><%= error %></p>
+      <% } %>
+      <% if (config && config.ultimo_error) { %>
+        <p class="auth-message auth-message--error">El último respaldo automático falló: <%= config.ultimo_error.mensaje %></p>
+      <% } %>
+
+      <div class="aviso-seguridad">
+        <i class="bi bi-shield-lock-fill"></i>
+        <p>
+          Cada respaldo es una copia completa de la base (incluye usuarios con sus contraseñas cifradas y las claves de los sensores).
+          Se guarda en un volumen de Docker fuera del repositorio. Descárgalo solo a equipos de confianza y no lo compartas.
+        </p>
+      </div>
+
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Respaldo</th><th>Fecha</th><th>Tamaño</th><th>Tipo</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% if (respaldos.length === 0) { %>
+              <tr><td colspan="5" class="data-table-empty">Todavía no hay respaldos. Crea el primero con "Crear respaldo ahora".</td></tr>
+            <% } %>
+            <% respaldos.forEach(r => { %>
+              <tr>
+                <td><code class="nombre-respaldo"><%= r.nombre %></code></td>
+                <td><span data-fecha="<%= r.fecha %>"></span></td>
+                <td><%= tamano(r.tamano_bytes) %></td>
+                <td>
+                  <span class="badge <%= r.tipo === 'manual' ? 'badge--neutral' : 'badge--info' %>"><%= r.tipo === 'manual' ? 'Manual' : 'Automático' %></span>
+                  <div class="cell-sub"><%= r.motivo %></div>
+                </td>
+                <td class="acciones-respaldo">
+                  <a class="btn-secondary btn-sm" href="/respaldos/<%= encodeURIComponent(r.nombre) %>/descargar"><i class="bi bi-download"></i> Descargar</a>
+                  <button type="button" class="btn-secondary btn-sm btn-danger-soft" data-nombre="<%= r.nombre %>" onclick="abrirRestaurar(this)">
+                    <i class="bi bi-arrow-counterclockwise"></i> Restaurar
+                  </button>
+                  <form method="POST" action="/respaldos/<%= encodeURIComponent(r.nombre) %>/eliminar"
+                    onsubmit="return confirm('¿Eliminar el respaldo <%= r.nombre %>? No se puede deshacer.')">
+                    <button type="submit" class="btn-secondary btn-sm" title="Eliminar"><i class="bi bi-trash"></i> Eliminar</button>
+                  </form>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="section-title">Exportar datos</h3>
+      <form class="exportar-panel" method="GET" action="/respaldos/exportar">
+        <div class="filter-bar">
+          <div class="form-field">
+            <label for="exp-tipo">Datos</label>
+            <select class="finca-select" name="tipo" id="exp-tipo" required>
+              <option value="lecturas">Lecturas de sensores</option>
+              <option value="alertas">Alertas</option>
+              <option value="cultivos">Inventario de cultivos</option>
+              <option value="riego">Bitácora de riego</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="exp-parcela">Parcela</label>
+            <select class="finca-select" name="parcela" id="exp-parcela">
+              <option value="">Todas</option>
+              <% fincas.forEach(f => { %>
+                <optgroup label="<%= f.nombre %>">
+                  <% f.parcelas.forEach(p => { %><option value="<%= p.id %>"><%= p.nombre %></option><% }) %>
+                </optgroup>
+              <% }) %>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="exp-desde">Desde</label>
+            <input class="finca-select" type="date" name="desde" id="exp-desde">
+          </div>
+          <div class="form-field">
+            <label for="exp-hasta">Hasta</label>
+            <input class="finca-select" type="date" name="hasta" id="exp-hasta">
+          </div>
+          <button type="submit" class="btn-primary"><i class="bi bi-filetype-csv"></i> Descargar CSV</button>
+        </div>
+        <p class="form-field-hint" id="exp-ayuda"></p>
+      </form>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-restaurar">
+    <div class="modal-box modal-box--wide">
+      <h3><i class="bi bi-exclamation-octagon-fill text-alerta"></i> Restaurar respaldo</h3>
+      <form method="POST" id="form-restaurar" action="#">
+        <p class="modal-hint">
+          Vas a reemplazar <strong>toda la base de datos</strong> por el contenido de
+          <code id="restaurar-nombre"></code>. Todo lo que se registró después de ese respaldo (lecturas, alertas, cultivos, riegos,
+          usuarios…) se pierde. Antes de restaurar se guarda automáticamente un respaldo de seguridad del estado actual.
+        </p>
+        <div class="form-field">
+          <label for="restaurar-confirmacion">Escribe RESTAURAR para confirmar</label>
+          <input type="text" name="confirmacion" id="restaurar-confirmacion" autocomplete="off" placeholder="RESTAURAR">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-restaurar').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary btn-peligro" id="restaurar-boton" disabled>Restaurar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll('[data-fecha]').forEach((el) => {
+      const d = new Date(el.dataset.fecha);
+      if (!isNaN(d)) el.textContent = d.toLocaleString('es-GT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    });
+
+    const confirmacion = document.getElementById('restaurar-confirmacion');
+    const boton = document.getElementById('restaurar-boton');
+    confirmacion.addEventListener('input', () => { boton.disabled = confirmacion.value !== 'RESTAURAR'; });
+
+    function abrirRestaurar(btn) {
+      const nombre = btn.dataset.nombre;
+      document.getElementById('restaurar-nombre').textContent = nombre;
+      document.getElementById('form-restaurar').action = '/respaldos/' + encodeURIComponent(nombre) + '/restaurar';
+      confirmacion.value = '';
+      boton.disabled = true;
+      document.getElementById('modal-restaurar').classList.add('open');
+      confirmacion.focus();
+    }
+    document.getElementById('form-restaurar').addEventListener('submit', () => {
+      boton.disabled = true;
+      boton.textContent = 'Restaurando…';
+    });
+
+    // Ayuda según el tipo de datos
+    const AYUDAS = {
+      lecturas: 'Una fila por lectura de sensor (hora local). Máximo 50,000 filas por archivo: si hay más, acota el rango de fechas; el nombre del archivo avisa si quedó recortado.',
+      alertas: 'Alertas de sensores y de clima con su estado, quién las atendió y cuándo se resolvieron. El rango se aplica a la fecha de inicio.',
+      cultivos: 'Inventario de cultivos. El rango de fechas se aplica a la fecha de siembra.',
+      riego: 'Bitácora de riego (programados, manuales, automáticos y omitidos). Las horas son las del reloj del motor de riego (simulado durante la demo).',
+    };
+    const tipo = document.getElementById('exp-tipo');
+    const ayuda = document.getElementById('exp-ayuda');
+    const mostrarAyuda = () => { ayuda.textContent = AYUDAS[tipo.value] + ' Sin fechas se exporta todo.'; };
+    tipo.addEventListener('change', mostrarAyuda);
+    mostrarAyuda();
+  </script>
+</body>
+</html>

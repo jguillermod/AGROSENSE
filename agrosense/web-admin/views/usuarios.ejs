@@ -35,7 +35,7 @@
               <tr>
                 <td><i class="bi bi-person-circle"></i> <%= u.nombre %></td>
                 <td><%= u.email %></td>
-                <td><span class="badge <%= u.rol === 'admin' ? 'badge--success' : 'badge--neutral' %>"><%= u.rol %></span></td>
+                <td><span class="badge <%= u.rol === 'admin' ? 'badge--success' : u.rol === 'agronomo' ? 'badge--info' : 'badge--neutral' %>"><%= { admin: 'Administrador', agricultor: 'Agricultor', agronomo: 'Agrónomo' }[u.rol] || u.rol %></span></td>
                 <td><%= (parcelasPorUsuario[u.id] || []).join(', ') || '—' %></td>
                 <td><%= new Date(u.creado_en).toLocaleDateString('es-ES') %></td>
                 <td class="row-actions">
@@ -86,8 +86,10 @@
           <select name="rol" id="nuevo-usuario-rol" required>
             <option value="" disabled selected>Selecciona un rol</option>
             <option value="agricultor">Agricultor</option>
+            <option value="agronomo">Agrónomo</option>
             <option value="admin">Administrador</option>
           </select>
+          <p class="form-field-hint">Agrónomo: solo ve y opera las parcelas que le asignes abajo. Agricultor y administrador ven todas; solo el administrador gestiona sensores, usuarios y respaldos.</p>
         </div>
 
         <div class="field-group">
@@ -134,8 +136,10 @@
           <label for="editar-usuario-rol">Rol</label>
           <select name="rol" id="editar-usuario-rol" required>
             <option value="agricultor">Agricultor</option>
+            <option value="agronomo">Agrónomo</option>
             <option value="admin">Administrador</option>
           </select>
+          <p class="form-field-hint">Agrónomo: solo ve y opera las parcelas asignadas abajo.</p>
         </div>
 
         <div class="field-group">
