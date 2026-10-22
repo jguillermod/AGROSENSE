@@ -373,14 +373,230 @@ app.get("/api/estaciones", async (req, res) => {
   res.json(rows);
 });
 
+// --- Inventario de cultivos ---
+// Permisos: igual que los registros manuales de lecturas-service, si la
+// petición trae usuario_id y ese usuario es agrónomo, solo ve y gestiona
+// cultivos de las parcelas que tiene asignadas en usuario_parcelas; admin y
+// agricultor mantienen el mismo acceso amplio que ya tienen sobre parcelas.
+
+const UNIDADES_CULTIVO = ["plantas", "kg", "quintales"];
+const ESTADOS_CULTIVO = ["sembrado", "en_crecimiento", "cosechado"];
+
+// Las fechas se devuelven como texto YYYY-MM-DD: un DATE convertido a Date
+// de JS llega como medianoche UTC y en el navegador/celular (UTC-6) se
+// mostraría como el día anterior.
+const SELECT_CULTIVOS = `
+  SELECT c.id, c.parcela_id, p.nombre AS parcela_nombre, p.finca_id, f.nombre AS finca_nombre,
+         c.tipo, c.variedad,
+         DATE_FORMAT(c.fecha_siembra, '%Y-%m-%d') AS fecha_siembra,
+         DATE_FORMAT(c.fecha_cosecha_estimada, '%Y-%m-%d') AS fecha_cosecha_estimada,
+         c.cantidad, c.unidad, c.estado, c.notas, c.creado_en
+  FROM cultivos c
+  JOIN parcelas p ON p.id = c.parcela_id
+  JOIN fincas f ON f.id = p.finca_id`;
+
+const idPositivo = (valor) => {
+  const n = Number(valor);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+function fechaValida(valor) {
+  if (typeof valor !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
+  const fecha = new Date(`${valor}T00:00:00Z`);
+  return !Number.isNaN(fecha.getTime()) && fecha.toISOString().slice(0, 10) === valor;
+}
+
+// Devuelve { error } o { datos } con los campos ya normalizados
+function validarCultivo(body) {
+  const texto = (v) => (v === undefined || v === null ? "" : String(v).trim());
+  const datos = {
+    parcela_id: idPositivo(body.parcela_id),
+    tipo: texto(body.tipo),
+    variedad: texto(body.variedad) || null,
+    fecha_siembra: texto(body.fecha_siembra),
+    fecha_cosecha_estimada: texto(body.fecha_cosecha_estimada) || null,
+    cantidad: Number(body.cantidad),
+    unidad: texto(body.unidad) || "plantas",
+    estado: texto(body.estado) || "sembrado",
+    notas: texto(body.notas) || null,
+  };
+
+  if (!datos.parcela_id) return { error: "Selecciona una parcela" };
+  if (!datos.tipo) return { error: "El tipo de cultivo es obligatorio" };
+  if (datos.tipo.length > 100) return { error: "El tipo no puede superar 100 caracteres" };
+  if (datos.variedad && datos.variedad.length > 100) return { error: "La variedad no puede superar 100 caracteres" };
+  if (!fechaValida(datos.fecha_siembra)) return { error: "La fecha de siembra es obligatoria y debe ser válida" };
+  if (datos.fecha_cosecha_estimada) {
+    if (!fechaValida(datos.fecha_cosecha_estimada)) return { error: "La fecha de cosecha estimada no es válida" };
+    if (datos.fecha_cosecha_estimada < datos.fecha_siembra) {
+      return { error: "La fecha de cosecha estimada no puede ser anterior a la de siembra" };
+    }
+  }
+  if (texto(body.cantidad) === "" || !Number.isFinite(datos.cantidad) || datos.cantidad <= 0) {
+    return { error: "La cantidad es obligatoria y debe ser mayor que 0" };
+  }
+  if (datos.cantidad >= 1e8) return { error: "La cantidad es demasiado grande" };
+  if (!UNIDADES_CULTIVO.includes(datos.unidad)) return { error: `Unidad inválida (usa: ${UNIDADES_CULTIVO.join(", ")})` };
+  if (!ESTADOS_CULTIVO.includes(datos.estado)) return { error: `Estado inválido (usa: ${ESTADOS_CULTIVO.join(", ")})` };
+  return { datos };
+}
+
+async function esAgronomo(usuarioId) {
+  if (!usuarioId) return false;
+  const [rows] = await pool.query("SELECT rol FROM usuarios WHERE id = ?", [usuarioId]);
+  return rows.length > 0 && rows[0].rol === "agronomo";
+}
+
+async function puedeGestionarParcela(usuarioId, parcelaId) {
+  if (!usuarioId) return true;
+  const [usuarios] = await pool.query("SELECT rol FROM usuarios WHERE id = ?", [usuarioId]);
+  if (usuarios.length === 0) return false;
+  if (usuarios[0].rol !== "agronomo") return true;
+  const [asignaciones] = await pool.query(
+    "SELECT 1 FROM usuario_parcelas WHERE usuario_id = ? AND parcela_id = ?",
+    [usuarioId, parcelaId]
+  );
+  return asignaciones.length > 0;
+}
+
+// Listado con filtros opcionales: finca_id, parcela_id, estado, usuario_id
+app.get("/api/cultivos", async (req, res) => {
+  try {
+    const condiciones = [];
+    const params = [];
+    const fincaId = idPositivo(req.query.finca_id);
+    const parcelaId = idPositivo(req.query.parcela_id);
+    const usuarioId = idPositivo(req.query.usuario_id);
+    if (fincaId) {
+      condiciones.push("p.finca_id = ?");
+      params.push(fincaId);
+    }
+    if (parcelaId) {
+      condiciones.push("c.parcela_id = ?");
+      params.push(parcelaId);
+    }
+    if (ESTADOS_CULTIVO.includes(req.query.estado)) {
+      condiciones.push("c.estado = ?");
+      params.push(req.query.estado);
+    }
+    if (await esAgronomo(usuarioId)) {
+      condiciones.push("c.parcela_id IN (SELECT parcela_id FROM usuario_parcelas WHERE usuario_id = ?)");
+      params.push(usuarioId);
+    }
+    const where = condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "";
+    const [rows] = await pool.query(
+      `${SELECT_CULTIVOS} ${where} ORDER BY f.nombre, p.nombre, c.fecha_siembra DESC, c.id DESC`,
+      params
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al consultar los cultivos" });
+  }
+});
+
+app.get("/api/parcelas/:parcelaId/cultivos", async (req, res) => {
+  try {
+    const parcelaId = idPositivo(req.params.parcelaId);
+    if (!parcelaId) return res.status(400).json({ error: "Parcela inválida" });
+    if (!(await puedeGestionarParcela(idPositivo(req.query.usuario_id), parcelaId))) {
+      return res.status(403).json({ error: "No tienes esta parcela asignada" });
+    }
+    const [rows] = await pool.query(
+      `${SELECT_CULTIVOS} WHERE c.parcela_id = ? ORDER BY c.fecha_siembra DESC, c.id DESC`,
+      [parcelaId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al consultar los cultivos" });
+  }
+});
+
+app.post("/api/cultivos", async (req, res) => {
+  const { error, datos } = validarCultivo(req.body);
+  if (error) return res.status(400).json({ error });
+  try {
+    if (!(await puedeGestionarParcela(idPositivo(req.body.usuario_id), datos.parcela_id))) {
+      return res.status(403).json({ error: "No tienes esta parcela asignada" });
+    }
+    const [result] = await pool.query(
+      `INSERT INTO cultivos (parcela_id, tipo, variedad, fecha_siembra, fecha_cosecha_estimada, cantidad, unidad, estado, notas)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [datos.parcela_id, datos.tipo, datos.variedad, datos.fecha_siembra, datos.fecha_cosecha_estimada,
+       datos.cantidad, datos.unidad, datos.estado, datos.notas]
+    );
+    res.status(201).json({ id: result.insertId, ...datos });
+  } catch (err) {
+    if (err.code === "ER_NO_REFERENCED_ROW_2") return res.status(400).json({ error: "La parcela no existe" });
+    console.error(err);
+    res.status(500).json({ error: "Error al crear el cultivo" });
+  }
+});
+
+app.put("/api/cultivos/:id", async (req, res) => {
+  const { error, datos } = validarCultivo(req.body);
+  if (error) return res.status(400).json({ error });
+  try {
+    const [actual] = await pool.query("SELECT parcela_id FROM cultivos WHERE id = ?", [req.params.id]);
+    if (actual.length === 0) return res.status(404).json({ error: "Cultivo no encontrado" });
+
+    // Si se mueve de parcela, hace falta permiso sobre la de origen y la de destino
+    const usuarioId = idPositivo(req.body.usuario_id);
+    const permitido =
+      (await puedeGestionarParcela(usuarioId, actual[0].parcela_id)) &&
+      (await puedeGestionarParcela(usuarioId, datos.parcela_id));
+    if (!permitido) return res.status(403).json({ error: "No tienes esta parcela asignada" });
+
+    await pool.query(
+      `UPDATE cultivos SET parcela_id = ?, tipo = ?, variedad = ?, fecha_siembra = ?, fecha_cosecha_estimada = ?,
+              cantidad = ?, unidad = ?, estado = ?, notas = ?
+       WHERE id = ?`,
+      [datos.parcela_id, datos.tipo, datos.variedad, datos.fecha_siembra, datos.fecha_cosecha_estimada,
+       datos.cantidad, datos.unidad, datos.estado, datos.notas, req.params.id]
+    );
+    res.json({ id: Number(req.params.id), ...datos });
+  } catch (err) {
+    if (err.code === "ER_NO_REFERENCED_ROW_2") return res.status(400).json({ error: "La parcela no existe" });
+    console.error(err);
+    res.status(500).json({ error: "Error al editar el cultivo" });
+  }
+});
+
+app.delete("/api/cultivos/:id", async (req, res) => {
+  try {
+    const [actual] = await pool.query("SELECT parcela_id FROM cultivos WHERE id = ?", [req.params.id]);
+    if (actual.length === 0) return res.status(404).json({ error: "Cultivo no encontrado" });
+    if (!(await puedeGestionarParcela(idPositivo(req.query.usuario_id), actual[0].parcela_id))) {
+      return res.status(403).json({ error: "No tienes esta parcela asignada" });
+    }
+    await pool.query("DELETE FROM cultivos WHERE id = ?", [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al eliminar el cultivo" });
+  }
+});
+
 // --- Dashboard: resumen general ---
+// cultivos_activos = cultivos no cosechados; si llega usuario_id de un
+// agrónomo, solo cuenta los de sus parcelas asignadas.
 app.get("/api/dashboard/resumen", async (req, res) => {
+  const usuarioId = idPositivo(req.query.usuario_id);
+  const soloAsignadas = await esAgronomo(usuarioId);
   const [[resumen]] = await pool.query(
     `SELECT
        (SELECT COUNT(*) FROM estaciones) AS estaciones_activas,
        (SELECT COUNT(*) FROM alertas WHERE DATE(fecha) = CURDATE()) AS alertas_hoy,
        (SELECT ROUND(AVG(humedad_suelo)) FROM lecturas WHERE fecha >= NOW() - INTERVAL 1 DAY) AS humedad_promedio,
-       (SELECT ROUND(AVG(temperatura)) FROM lecturas WHERE fecha >= NOW() - INTERVAL 1 DAY) AS temperatura_promedio`
+       (SELECT ROUND(AVG(temperatura)) FROM lecturas WHERE fecha >= NOW() - INTERVAL 1 DAY) AS temperatura_promedio,
+       ${
+         soloAsignadas
+           ? `(SELECT COUNT(*) FROM cultivos c JOIN usuario_parcelas up ON up.parcela_id = c.parcela_id
+               WHERE up.usuario_id = ? AND c.estado <> 'cosechado')`
+           : `(SELECT COUNT(*) FROM cultivos WHERE estado <> 'cosechado')`
+       } AS cultivos_activos`,
+    soloAsignadas ? [usuarioId] : []
   );
   res.json(resumen);
 });

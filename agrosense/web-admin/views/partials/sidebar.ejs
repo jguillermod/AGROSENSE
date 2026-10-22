@@ -13,8 +13,14 @@
     <a href="/parcelas" class="<%= active === 'parcelas' ? 'active' : '' %>">
       <i class="bi bi-map-fill"></i> Parcelas
     </a>
+    <a href="/cultivos" class="<%= active === 'cultivos' ? 'active' : '' %>">
+      <i class="bi bi-flower1"></i> Cultivos
+    </a>
     <a href="/sensores" class="<%= active === 'sensores' ? 'active' : '' %>">
       <i class="bi bi-broadcast"></i> Sensores
+    </a>
+    <a href="/lecturas" class="<%= active === 'lecturas' ? 'active' : '' %>">
+      <i class="bi bi-activity"></i> Lecturas en vivo
     </a>
     <% if (usuario && usuario.rol === 'admin') { %>
       <a href="/usuarios" class="<%= active === 'usuarios' ? 'active' : '' %>">

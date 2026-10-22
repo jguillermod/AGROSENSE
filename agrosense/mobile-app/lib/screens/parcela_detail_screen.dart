@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../services/auth_service.dart';
 import '../services/data_service.dart';
 import '../widgets/common.dart';
+import 'cultivos_screen.dart';
 import 'historial_screen.dart';
 
 class ParcelaDetailScreen extends StatefulWidget {
@@ -23,6 +24,7 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
   late Future<List<Alerta>> _alertasFuture;
   late Future<List<Estacion>> _estacionesFuture;
   late Future<List<RegistroManual>> _registrosFuture;
+  late Future<List<Cultivo>> _cultivosFuture;
 
   @override
   void initState() {
@@ -30,6 +32,20 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
     _alertasFuture = _dataService.getAlertas(widget.parcela.id);
     _estacionesFuture = _dataService.getEstaciones(widget.parcela.id);
     _registrosFuture = _dataService.getRegistros(widget.parcela.id);
+    _cultivosFuture = _cargarCultivos();
+  }
+
+  Future<List<Cultivo>> _cargarCultivos() async {
+    final usuarioId = await _authService.getUsuarioId();
+    return _dataService.getCultivosParcela(widget.parcela.id, usuarioId: usuarioId!);
+  }
+
+  Future<void> _abrirCultivos() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => CultivosScreen(parcela: widget.parcela)),
+    );
+    // al volver, el resumen refleja lo que se haya agregado/editado
+    if (mounted) setState(() => _cultivosFuture = _cargarCultivos());
   }
 
   Future<void> _agregarRegistro() async {
@@ -157,8 +173,9 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
             _alertasFuture = _dataService.getAlertas(parcela.id);
             _estacionesFuture = _dataService.getEstaciones(parcela.id);
             _registrosFuture = _dataService.getRegistros(parcela.id);
+            _cultivosFuture = _cargarCultivos();
           });
-          await Future.wait([_alertasFuture, _estacionesFuture, _registrosFuture]);
+          await Future.wait([_alertasFuture, _estacionesFuture, _registrosFuture, _cultivosFuture]);
         },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
@@ -166,6 +183,10 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
             _buildResumenCard(parcela),
             const SizedBox(height: 20),
             _buildUmbralesCard(parcela),
+            const SizedBox(height: 20),
+            const Text('Cultivos', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.darkGreen)),
+            const SizedBox(height: 8),
+            _buildCultivosCard(),
             const SizedBox(height: 20),
             const Text('Alertas activas', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.darkGreen)),
             const SizedBox(height: 8),
@@ -269,6 +290,35 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
           Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
         ],
       ),
+    );
+  }
+
+  Widget _buildCultivosCard() {
+    return FutureBuilder<List<Cultivo>>(
+      future: _cultivosFuture,
+      builder: (context, snapshot) {
+        final String subtitulo;
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          subtitulo = 'Cargando…';
+        } else if (snapshot.hasError) {
+          subtitulo = 'No se pudieron cargar los cultivos';
+        } else {
+          final cultivos = snapshot.data ?? [];
+          final activos = cultivos.where((c) => c.estado != 'cosechado').length;
+          subtitulo = cultivos.isEmpty
+              ? 'Sin cultivos registrados · toca para agregar'
+              : '$activos ${activos == 1 ? 'activo' : 'activos'} · ${cultivos.length} en total';
+        }
+        return Card(
+          child: ListTile(
+            leading: const Icon(Icons.eco, color: AppTheme.primaryGreen),
+            title: const Text('Inventario de cultivos'),
+            subtitle: Text(subtitulo),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _abrirCultivos,
+          ),
+        );
+      },
     );
   }
 

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 
 import '../config/api_config.dart';
 import '../models/models.dart';
@@ -267,10 +268,79 @@ class DataService {
     _checkOk(res, 'No se pudieron asignar las parcelas');
   }
 
+  // --- Inventario de cultivos ---
+  // Siempre se manda el usuario_id: si es agrónomo, fincas-service solo le
+  // deja ver y gestionar cultivos de sus parcelas asignadas.
+
+  static final _formatoFecha = DateFormat('yyyy-MM-dd');
+
+  Future<List<Cultivo>> getCultivosParcela(int parcelaId, {required int usuarioId}) async {
+    final res = await http.get(
+      Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/cultivos?usuario_id=$usuarioId'),
+    );
+    _checkOk(res, 'No se pudieron cargar los cultivos');
+    final List<dynamic> data = jsonDecode(res.body);
+    return data.map((e) => Cultivo.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Crea el cultivo si [id] es null; si no, lo edita.
+  Future<void> guardarCultivo({
+    int? id,
+    required int usuarioId,
+    required int parcelaId,
+    required String tipo,
+    String? variedad,
+    required DateTime fechaSiembra,
+    DateTime? fechaCosechaEstimada,
+    required double cantidad,
+    required String unidad,
+    required String estado,
+    String? notas,
+  }) async {
+    final body = jsonEncode({
+      'usuario_id': usuarioId,
+      'parcela_id': parcelaId,
+      'tipo': tipo,
+      'variedad': variedad,
+      'fecha_siembra': _formatoFecha.format(fechaSiembra),
+      'fecha_cosecha_estimada': fechaCosechaEstimada != null ? _formatoFecha.format(fechaCosechaEstimada) : null,
+      'cantidad': cantidad,
+      'unidad': unidad,
+      'estado': estado,
+      'notas': notas,
+    });
+
+    if (id == null) {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.fincasBaseUrl}/api/cultivos'),
+        headers: _jsonHeaders,
+        body: body,
+      );
+      _checkCreated(res, 'No se pudo crear el cultivo');
+    } else {
+      final res = await http.put(
+        Uri.parse('${ApiConfig.fincasBaseUrl}/api/cultivos/$id'),
+        headers: _jsonHeaders,
+        body: body,
+      );
+      _checkOk(res, 'No se pudo editar el cultivo');
+    }
+  }
+
+  Future<void> eliminarCultivo(int id, {required int usuarioId}) async {
+    final res = await http.delete(
+      Uri.parse('${ApiConfig.fincasBaseUrl}/api/cultivos/$id?usuario_id=$usuarioId'),
+    );
+    _checkOk(res, 'No se pudo eliminar el cultivo');
+  }
+
   // --- Dashboard ---
 
-  Future<DashboardResumen> getDashboardResumen() async {
-    final res = await http.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/dashboard/resumen'));
+  /// Con [usuarioId], el contador de cultivos activos de un agrónomo se
+  /// limita a sus parcelas asignadas (el resto del resumen es general).
+  Future<DashboardResumen> getDashboardResumen({int? usuarioId}) async {
+    final query = usuarioId != null ? '?usuario_id=$usuarioId' : '';
+    final res = await http.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/dashboard/resumen$query'));
     _checkOk(res, 'No se pudo cargar el resumen');
     return DashboardResumen.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }

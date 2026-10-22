@@ -1,5 +1,5 @@
-// Datos demo del simulador: 1 finca, 3 parcelas con umbrales distintos y
-// 2 estaciones por parcela.
+// Datos demo del simulador: 1 finca, 3 parcelas con umbrales distintos,
+// 2 estaciones por parcela y un inventario de cultivos por parcela.
 //
 // Las estaciones se dan de alta con el MISMO flujo que un sensor físico
 // (ver fincas-service): se pide un token de un solo uso y se consume en
@@ -28,6 +28,56 @@ const PARCELAS_DEMO = [
   { nombre: "Demo - Maíz", humedad_min: 25, humedad_max: 70, temperatura_max: 36 },
   { nombre: "Demo - Fresa", humedad_min: 45, humedad_max: 85, temperatura_max: 30 },
 ];
+
+// Inventario demo por parcela. Las fechas son relativas al día en que se
+// crean (días desde hoy) para que siempre sean coherentes con el estado:
+// un ciclo ya cosechado y otro en curso.
+const CULTIVOS_DEMO = {
+  "Demo - Tomate": [
+    { tipo: "Tomate", variedad: "Roma", siembra: -150, cosecha: -60, cantidad: 1800, unidad: "kg", estado: "cosechado",
+      notas: "Ciclo anterior (datos demo del simulador)." },
+    { tipo: "Tomate", variedad: "Roma", siembra: -45, cosecha: 45, cantidad: 1200, unidad: "plantas", estado: "en_crecimiento",
+      notas: "Ciclo actual (datos demo del simulador)." },
+  ],
+  "Demo - Maíz": [
+    { tipo: "Maíz", variedad: "ICTA B-15", siembra: -70, cosecha: 50, cantidad: 8000, unidad: "plantas", estado: "en_crecimiento",
+      notas: "Datos demo del simulador." },
+  ],
+  "Demo - Fresa": [
+    { tipo: "Fresa", variedad: "Festival", siembra: -10, cosecha: 80, cantidad: 2500, unidad: "plantas", estado: "sembrado",
+      notas: "Datos demo del simulador." },
+  ],
+};
+
+const fechaRelativa = (dias) => {
+  const fecha = new Date();
+  fecha.setDate(fecha.getDate() + dias);
+  return fecha.toISOString().slice(0, 10);
+};
+
+// Solo siembra el inventario demo en parcelas que todavía no tienen ningún
+// cultivo: así no se duplica al reiniciar ni se pisan cultivos que alguien
+// haya agregado o editado desde el panel o la app.
+async function prepararCultivosDemo(parcela) {
+  const plantilla = CULTIVOS_DEMO[parcela.nombre];
+  if (!plantilla) return;
+  const existentes = await api("GET", `/api/parcelas/${parcela.id}/cultivos`);
+  if (existentes.length > 0) return;
+  for (const c of plantilla) {
+    await api("POST", "/api/cultivos", {
+      parcela_id: parcela.id,
+      tipo: c.tipo,
+      variedad: c.variedad,
+      fecha_siembra: fechaRelativa(c.siembra),
+      fecha_cosecha_estimada: fechaRelativa(c.cosecha),
+      cantidad: c.cantidad,
+      unidad: c.unidad,
+      estado: c.estado,
+      notas: c.notas,
+    });
+  }
+  console.log(`[sim] Cultivos demo creados en ${parcela.nombre} (${plantilla.length})`);
+}
 
 async function api(method, ruta, body) {
   const res = await fetch(`${FINCAS_URL}${ruta}`, {
@@ -103,6 +153,8 @@ async function prepararDatosDemo() {
   const resultado = [];
 
   for (const p of parcelas) {
+    await prepararCultivosDemo(p);
+
     const existentes = (await api("GET", `/api/parcelas/${p.id}/estaciones`)).filter((e) =>
       e.codigo.startsWith(PREFIJO_CODIGO)
     );

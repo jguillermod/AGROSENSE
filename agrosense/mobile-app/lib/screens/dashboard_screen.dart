@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../config/theme.dart';
 import '../models/models.dart';
+import '../services/auth_service.dart';
 import '../services/data_service.dart';
 import '../widgets/common.dart';
 
@@ -23,6 +24,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  final _authService = AuthService();
   final _dataService = DataService();
   late Future<(DashboardResumen, List<HistorialPunto>)> _future;
 
@@ -33,7 +35,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<(DashboardResumen, List<HistorialPunto>)> _cargar() async {
-    final resumen = await _dataService.getDashboardResumen();
+    final usuarioId = await _authService.getUsuarioId();
+    final resumen = await _dataService.getDashboardResumen(usuarioId: usuarioId);
     final historial = await _dataService.getDashboardHistorial(dias: 7);
     return (resumen, historial);
   }
@@ -103,6 +106,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       color: AppTheme.danger,
                       value: resumen.temperaturaPromedio != null ? '${resumen.temperaturaPromedio!.round()}°C' : '—',
                       label: 'Temp. promedio',
+                    ),
+                    _StatCard(
+                      icon: Icons.eco,
+                      color: const Color(0xFF558B2F),
+                      value: '${resumen.cultivosActivos}',
+                      label: 'Cultivos activos',
                     ),
                   ],
                 ),

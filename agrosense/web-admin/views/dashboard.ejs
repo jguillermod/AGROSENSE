@@ -36,6 +36,11 @@
           <div class="stat-value"><%= resumen.temperatura_promedio != null ? resumen.temperatura_promedio + '°C' : '—' %></div>
           <div class="stat-label">Temp. promedio</div>
         </div>
+        <a href="/cultivos" class="stat-card stat-card--olive stat-card--link">
+          <i class="bi bi-flower1 stat-icon"></i>
+          <div class="stat-value"><%= resumen.cultivos_activos || 0 %></div>
+          <div class="stat-label">Cultivos activos</div>
+        </a>
       </div>
 
       <div class="panel-dark">

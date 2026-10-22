@@ -16,6 +16,7 @@ app.use(cookieParser());
 
 const AUTH_URL = process.env.AUTH_SERVICE_URL;
 const FINCAS_URL = process.env.FINCAS_SERVICE_URL;
+const LECTURAS_URL = process.env.LECTURAS_SERVICE_URL;
 
 const AVATARS_DIR = path.join(__dirname, "../public/uploads/avatars");
 fs.mkdirSync(AVATARS_DIR, { recursive: true });
@@ -143,7 +144,7 @@ app.post("/register", async (req, res) => {
 app.get("/dashboard", requireAuth, async (req, res) => {
   try {
     const [{ data: resumen }, { data: historial }] = await Promise.all([
-      axios.get(`${FINCAS_URL}/api/dashboard/resumen`),
+      axios.get(`${FINCAS_URL}/api/dashboard/resumen`, { params: { usuario_id: req.usuario.id } }),
       axios.get(`${FINCAS_URL}/api/dashboard/humedad-historial?dias=7`),
     ]);
     res.render("dashboard", { active: "dashboard", resumen, historial });
@@ -151,7 +152,7 @@ app.get("/dashboard", requireAuth, async (req, res) => {
     console.error(err.message);
     res.render("dashboard", {
       active: "dashboard",
-      resumen: { estaciones_activas: 0, alertas_hoy: 0, humedad_promedio: 0, temperatura_promedio: 0 },
+      resumen: { estaciones_activas: 0, alertas_hoy: 0, humedad_promedio: 0, temperatura_promedio: 0, cultivos_activos: 0 },
       historial: [],
     });
   }
@@ -273,6 +274,125 @@ app.post("/parcelas/:id/eliminar", requireAuth, async (req, res) => {
   }
 });
 
+// --- Inventario de cultivos ---
+// Admin y agricultor ven y gestionan los cultivos de todas las parcelas
+// (el mismo acceso que ya tienen sobre parcelas); el agrónomo solo los de
+// sus parcelas asignadas. Por eso se manda siempre el usuario_id: el
+// fincas-service aplica esa regla también al crear, editar y eliminar.
+
+const ESTADOS_CULTIVO = { sembrado: "Sembrado", en_crecimiento: "En crecimiento", cosechado: "Cosechado" };
+const UNIDADES_CULTIVO = ["plantas", "kg", "quintales"];
+const CAMPOS_CULTIVO = [
+  "parcela_id", "tipo", "variedad", "fecha_siembra", "fecha_cosecha_estimada", "cantidad", "unidad", "estado", "notas",
+];
+
+async function parcelasDisponibles(usuario) {
+  const url = usuario.rol === "agronomo" ? `/api/usuarios/${usuario.id}/parcelas` : "/api/parcelas";
+  const { data } = await axios.get(`${FINCAS_URL}${url}`);
+  return data.map((p) => ({ id: p.id, nombre: p.nombre, finca_id: p.finca_id, finca_nombre: p.finca_nombre }));
+}
+
+function filtrosCultivos(fuente) {
+  return { finca: fuente.finca || "", parcela: fuente.parcela || "", estado: fuente.estado || "" };
+}
+
+function urlCultivos(filtros) {
+  const query = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v)).toString();
+  return query ? `/cultivos?${query}` : "/cultivos";
+}
+
+async function cargarCultivosView(usuario, filtros, extra = {}) {
+  const parcelas = await parcelasDisponibles(usuario);
+  const params = { usuario_id: usuario.id };
+  if (filtros.finca) params.finca_id = filtros.finca;
+  if (filtros.parcela) params.parcela_id = filtros.parcela;
+  if (filtros.estado) params.estado = filtros.estado;
+  const { data: cultivos } = await axios.get(`${FINCAS_URL}/api/cultivos`, { params });
+
+  const fincas = [];
+  parcelas.forEach((p) => {
+    if (!fincas.some((f) => f.id === p.finca_id)) fincas.push({ id: p.finca_id, nombre: p.finca_nombre });
+  });
+
+  return {
+    active: "cultivos",
+    cultivos,
+    parcelas,
+    fincas,
+    filtros,
+    estados: ESTADOS_CULTIVO,
+    unidades: UNIDADES_CULTIVO,
+    esAgronomo: usuario.rol === "agronomo",
+    error: null,
+    formulario: null,
+    ...extra,
+  };
+}
+
+function datosCultivo(body, usuarioId) {
+  const datos = { usuario_id: usuarioId };
+  CAMPOS_CULTIVO.forEach((campo) => (datos[campo] = body[campo]));
+  return datos;
+}
+
+// Si la API rechaza el formulario, se vuelve a mostrar con el error y con
+// el modal abierto y los valores que la persona ya había escrito.
+async function renderErrorCultivo(req, res, err, fallback, id = null) {
+  console.error(err.message);
+  const mensaje = err.response?.data?.error || fallback;
+  const filtros = filtrosCultivos({ finca: req.body.f_finca, parcela: req.body.f_parcela, estado: req.body.f_estado });
+  try {
+    res.render("cultivos", await cargarCultivosView(req.usuario, filtros, { error: mensaje, formulario: { ...req.body, id } }));
+  } catch (e) {
+    console.error(e.message);
+    res.redirect(urlCultivos(filtros));
+  }
+}
+
+app.get("/cultivos", requireAuth, async (req, res) => {
+  const filtros = filtrosCultivos(req.query);
+  try {
+    res.render("cultivos", await cargarCultivosView(req.usuario, filtros));
+  } catch (err) {
+    console.error(err.message);
+    res.render("cultivos", {
+      active: "cultivos", cultivos: [], parcelas: [], fincas: [], filtros, estados: ESTADOS_CULTIVO,
+      unidades: UNIDADES_CULTIVO, esAgronomo: req.usuario.rol === "agronomo",
+      error: "No se pudieron cargar los cultivos", formulario: null,
+    });
+  }
+});
+
+app.post("/cultivos", requireAuth, async (req, res) => {
+  try {
+    await axios.post(`${FINCAS_URL}/api/cultivos`, datosCultivo(req.body, req.usuario.id));
+    res.redirect(urlCultivos(filtrosCultivos({ finca: req.body.f_finca, parcela: req.body.f_parcela, estado: req.body.f_estado })));
+  } catch (err) {
+    await renderErrorCultivo(req, res, err, "No se pudo crear el cultivo");
+  }
+});
+
+app.post("/cultivos/:id/editar", requireAuth, async (req, res) => {
+  try {
+    await axios.put(`${FINCAS_URL}/api/cultivos/${req.params.id}`, datosCultivo(req.body, req.usuario.id));
+    res.redirect(urlCultivos(filtrosCultivos({ finca: req.body.f_finca, parcela: req.body.f_parcela, estado: req.body.f_estado })));
+  } catch (err) {
+    await renderErrorCultivo(req, res, err, "No se pudo editar el cultivo", req.params.id);
+  }
+});
+
+app.post("/cultivos/:id/eliminar", requireAuth, async (req, res) => {
+  const filtros = filtrosCultivos({ finca: req.body.f_finca, parcela: req.body.f_parcela, estado: req.body.f_estado });
+  try {
+    await axios.delete(`${FINCAS_URL}/api/cultivos/${req.params.id}`, { params: { usuario_id: req.usuario.id } });
+    res.redirect(urlCultivos(filtros));
+  } catch (err) {
+    console.error(err.message);
+    const mensaje = err.response?.data?.error || "No se pudo eliminar el cultivo";
+    res.render("cultivos", await cargarCultivosView(req.usuario, filtros, { error: mensaje }));
+  }
+});
+
 async function cargarSensoresView(extra = {}) {
   const [{ data: estaciones }, { data: tokens }, { data: parcelas }] = await Promise.all([
     axios.get(`${FINCAS_URL}/api/estaciones`),
@@ -341,6 +461,41 @@ app.post("/sensores/:id/eliminar", requireAuth, requireAdmin, async (req, res) =
     console.error(err.message);
     const mensaje = err.response?.data?.error || "No se pudo eliminar el sensor";
     res.render("sensores", await cargarSensoresView({ error: mensaje }));
+  }
+});
+
+// --- Lecturas en vivo ---
+// La página carga el selector de finca/parcela y luego el navegador pide
+// /lecturas/datos cada pocos segundos (el lecturas-service no es accesible
+// directamente desde el navegador).
+app.get("/lecturas", requireAuth, async (req, res) => {
+  try {
+    const { data: parcelas } = await axios.get(`${FINCAS_URL}/api/parcelas`);
+    res.render("lecturas", { active: "lecturas", parcelas, error: null });
+  } catch (err) {
+    console.error(err.message);
+    res.render("lecturas", { active: "lecturas", parcelas: [], error: "No se pudieron cargar las parcelas" });
+  }
+});
+
+app.get("/lecturas/datos", requireAuth, async (req, res) => {
+  const filtro = {};
+  if (req.query.parcela_id) filtro.parcela_id = req.query.parcela_id;
+  else if (req.query.finca_id) filtro.finca_id = req.query.finca_id;
+
+  try {
+    const [{ data: lecturas }, { data: alertas }, grafica] = await Promise.all([
+      axios.get(`${LECTURAS_URL}/api/lecturas/recientes`, { params: { ...filtro, limit: 50 } }),
+      axios.get(`${LECTURAS_URL}/api/alertas/recientes`, { params: { ...filtro, limit: 20 } }),
+      // la gráfica solo se dibuja para una parcela concreta, con más puntos que la tabla
+      filtro.parcela_id
+        ? axios.get(`${LECTURAS_URL}/api/lecturas/recientes`, { params: { parcela_id: filtro.parcela_id, limit: 200 } })
+        : Promise.resolve({ data: [] }),
+    ]);
+    res.json({ lecturas, alertas, grafica: grafica.data });
+  } catch (err) {
+    console.error(err.message);
+    res.status(502).json({ error: "No se pudieron obtener las lecturas" });
   }
 });
 

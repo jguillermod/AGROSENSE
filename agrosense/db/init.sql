@@ -100,7 +100,26 @@ CREATE TABLE IF NOT EXISTS registros_manuales (
     anotaciones TEXT NULL,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE,
-    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
+-- Inventario de cultivos por parcela. Se borra junto con su parcela,
+-- igual que registros_manuales y usuario_parcelas.
+-- (Copia de db/migrations/001_cultivos.sql para bases que ya existían.)
+CREATE TABLE IF NOT EXISTS cultivos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    parcela_id INT NOT NULL,
+    tipo VARCHAR(100) NOT NULL,
+    variedad VARCHAR(100) NULL,
+    fecha_siembra DATE NOT NULL,
+    fecha_cosecha_estimada DATE NULL,
+    cantidad DECIMAL(10,2) NOT NULL,
+    unidad ENUM('plantas', 'kg', 'quintales') NOT NULL DEFAULT 'plantas',
+    estado ENUM('sembrado', 'en_crecimiento', 'cosechado') NOT NULL DEFAULT 'sembrado',
+    notas TEXT NULL,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE,
+    INDEX idx_cultivos_estado (estado)
 );
 
 -- Tabla que llena el servicio ETL con los resúmenes diarios

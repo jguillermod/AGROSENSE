@@ -350,11 +350,15 @@ class DashboardResumen {
   final double? humedadPromedio;
   final double? temperaturaPromedio;
 
+  /// Cultivos no cosechados (para el agrónomo, solo los de sus parcelas).
+  final int cultivosActivos;
+
   DashboardResumen({
     required this.estacionesActivas,
     required this.alertasHoy,
     this.humedadPromedio,
     this.temperaturaPromedio,
+    this.cultivosActivos = 0,
   });
 
   factory DashboardResumen.fromJson(Map<String, dynamic> json) {
@@ -369,6 +373,68 @@ class DashboardResumen {
       alertasHoy: (json['alertas_hoy'] as num?)?.toInt() ?? 0,
       humedadPromedio: parseNum(json['humedad_promedio']),
       temperaturaPromedio: parseNum(json['temperatura_promedio']),
+      cultivosActivos: (json['cultivos_activos'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// Un cultivo del inventario de una parcela. Las fechas llegan como texto
+/// YYYY-MM-DD (sin hora) y se interpretan como fecha local.
+class Cultivo {
+  static const estados = {
+    'sembrado': 'Sembrado',
+    'en_crecimiento': 'En crecimiento',
+    'cosechado': 'Cosechado',
+  };
+  static const unidades = ['plantas', 'kg', 'quintales'];
+
+  final int id;
+  final int parcelaId;
+  final String? parcelaNombre;
+  final String? fincaNombre;
+  final String tipo;
+  final String? variedad;
+  final DateTime fechaSiembra;
+  final DateTime? fechaCosechaEstimada;
+  final double cantidad;
+  final String unidad;
+  final String estado;
+  final String? notas;
+
+  Cultivo({
+    required this.id,
+    required this.parcelaId,
+    this.parcelaNombre,
+    this.fincaNombre,
+    required this.tipo,
+    this.variedad,
+    required this.fechaSiembra,
+    this.fechaCosechaEstimada,
+    required this.cantidad,
+    required this.unidad,
+    required this.estado,
+    this.notas,
+  });
+
+  String get estadoTexto => estados[estado] ?? estado;
+
+  factory Cultivo.fromJson(Map<String, dynamic> json) {
+    final cantidad = json['cantidad'];
+    return Cultivo(
+      id: json['id'] as int,
+      parcelaId: json['parcela_id'] as int,
+      parcelaNombre: json['parcela_nombre'] as String?,
+      fincaNombre: json['finca_nombre'] as String?,
+      tipo: json['tipo'] as String,
+      variedad: json['variedad'] as String?,
+      fechaSiembra: DateTime.tryParse(json['fecha_siembra'].toString()) ?? DateTime.now(),
+      fechaCosechaEstimada: json['fecha_cosecha_estimada'] != null
+          ? DateTime.tryParse(json['fecha_cosecha_estimada'].toString())
+          : null,
+      cantidad: cantidad is num ? cantidad.toDouble() : double.tryParse(cantidad.toString()) ?? 0,
+      unidad: json['unidad'] as String? ?? 'plantas',
+      estado: json['estado'] as String? ?? 'sembrado',
+      notas: json['notas'] as String?,
     );
   }
 }

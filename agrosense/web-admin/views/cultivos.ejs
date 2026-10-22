@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <%- include('partials/head', { titulo: 'Cultivos' }) %>
+</head>
+<body>
+  <%
+    const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    // Las fechas llegan como texto YYYY-MM-DD; se formatean sin pasar por
+    // Date para no correr el día por la zona horaria.
+    const formatoFecha = (f) => {
+      if (!f) return '—';
+      const [a, m, d] = f.split('-');
+      return `${d} ${MESES[Number(m) - 1]} ${a}`;
+    };
+    const formatoCantidad = (n) => Number(n).toLocaleString('es-GT', { maximumFractionDigits: 2 });
+    const badgeEstado = { sembrado: 'badge--info', en_crecimiento: 'badge--success', cosechado: 'badge--neutral' };
+    const hayFiltros = filtros.finca || filtros.parcela || filtros.estado;
+  %>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
+
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Inventario de cultivos</h2>
+          <p class="page-subtitle">
+            <%= cultivos.length %> <%= cultivos.length === 1 ? 'cultivo' : 'cultivos' %><%= hayFiltros ? ' con los filtros aplicados' : ' registrados' %><%= esAgronomo ? ' · solo tus parcelas asignadas' : '' %>
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn-primary" <%= parcelas.length ? '' : 'disabled' %> onclick="abrirNuevoCultivo()">
+            <i class="bi bi-plus-lg"></i> Nuevo cultivo
+          </button>
+        </div>
+      </div>
+
+      <% if (error) { %>
+        <p class="auth-message auth-message--error"><%= error %></p>
+      <% } %>
+
+      <form class="filter-bar" method="GET" action="/cultivos" id="form-filtros">
+        <div class="form-field">
+          <label for="filtro-finca">Finca</label>
+          <select class="finca-select" name="finca" id="filtro-finca">
+            <option value="">Todas</option>
+            <% fincas.forEach(f => { %>
+              <option value="<%= f.id %>" <%= String(f.id) === filtros.finca ? 'selected' : '' %>><%= f.nombre %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="filtro-parcela">Parcela</label>
+          <select class="finca-select" name="parcela" id="filtro-parcela">
+            <option value="">Todas</option>
+            <% parcelas.forEach(p => { %>
+              <option value="<%= p.id %>" data-finca="<%= p.finca_id %>" <%= String(p.id) === filtros.parcela ? 'selected' : '' %>><%= p.nombre %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="filtro-estado">Estado</label>
+          <select class="finca-select" name="estado" id="filtro-estado">
+            <option value="">Todos</option>
+            <% Object.entries(estados).forEach(([valor, texto]) => { %>
+              <option value="<%= valor %>" <%= valor === filtros.estado ? 'selected' : '' %>><%= texto %></option>
+            <% }) %>
+          </select>
+        </div>
+        <% if (hayFiltros) { %>
+          <a class="filter-clear" href="/cultivos"><i class="bi bi-x-circle"></i> Limpiar filtros</a>
+        <% } %>
+      </form>
+
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Cultivo</th><th>Parcela</th><th>Siembra</th><th>Cosecha estimada</th><th>Cantidad</th><th>Estado</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% if (cultivos.length === 0) { %>
+              <tr><td colspan="7" class="data-table-empty">
+                <% if (parcelas.length === 0) { %>
+                  <%= esAgronomo ? 'Todavía no tienes parcelas asignadas. Pídele al administrador que te asigne una.' : 'Primero registra una parcela para poder agregar cultivos.' %>
+                <% } else if (hayFiltros) { %>
+                  No hay cultivos con estos filtros.
+                <% } else { %>
+                  Todavía no hay cultivos registrados.
+                <% } %>
+              </td></tr>
+            <% } %>
+            <% cultivos.forEach(c => { %>
+              <tr>
+                <td>
+                  <strong><%= c.tipo %></strong>
+                  <% if (c.variedad) { %><div class="cell-sub"><%= c.variedad %></div><% } %>
+                </td>
+                <td><%= c.parcela_nombre %><div class="cell-sub"><%= c.finca_nombre %></div></td>
+                <td><%= formatoFecha(c.fecha_siembra) %></td>
+                <td>
+                  <%= formatoFecha(c.fecha_cosecha_estimada) %>
+                  <% if (c.fecha_cosecha_estimada && c.estado !== 'cosechado') { %>
+                    <div class="cell-sub" data-cosecha="<%= c.fecha_cosecha_estimada %>"></div>
+                  <% } %>
+                </td>
+                <td><%= formatoCantidad(c.cantidad) %> <%= c.unidad %></td>
+                <td><span class="badge <%= badgeEstado[c.estado] || 'badge--neutral' %>"><%= estados[c.estado] || c.estado %></span></td>
+                <td class="row-actions">
+                  <button class="menu-trigger" onclick="this.parentElement.classList.toggle('open')" aria-label="Acciones">
+                    <i class="bi bi-three-dots-vertical"></i>
+                  </button>
+                  <div class="menu-dropdown">
+                    <button type="button" class="menu-item" data-cultivo="<%= JSON.stringify(c) %>" onclick="abrirEditarCultivo(this)">
+                      <i class="bi bi-pencil-fill"></i> Editar
+                    </button>
+                    <form method="POST" action="/cultivos/<%= c.id %>/eliminar"
+                      onsubmit="return confirm('¿Eliminar el cultivo &quot;<%= c.tipo %><%= c.variedad ? ' ' + c.variedad : '' %>&quot; de <%= c.parcela_nombre %>? Esta acción no se puede deshacer.')">
+                      <%- include('partials/filtros-cultivos', { filtros }) %>
+                      <button type="submit" class="menu-item danger"><i class="bi bi-trash-fill"></i> Eliminar</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-cultivo">
+    <div class="modal-box modal-box--wide">
+      <h3 id="cultivo-titulo"><i class="bi bi-flower1"></i> Nuevo cultivo</h3>
+      <form method="POST" id="form-cultivo" action="/cultivos">
+        <%- include('partials/filtros-cultivos', { filtros }) %>
+        <div class="form-field">
+          <label for="cultivo-parcela">Parcela</label>
+          <select name="parcela_id" id="cultivo-parcela" required>
+            <option value="" disabled selected>Selecciona una parcela</option>
+            <% fincas.forEach(f => { %>
+              <optgroup label="<%= f.nombre %>">
+                <% parcelas.filter(p => p.finca_id === f.id).forEach(p => { %>
+                  <option value="<%= p.id %>"><%= p.nombre %></option>
+                <% }) %>
+              </optgroup>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="cultivo-tipo">Tipo de cultivo</label>
+            <input type="text" name="tipo" id="cultivo-tipo" placeholder="Ej. Tomate" maxlength="100" required>
+          </div>
+          <div class="form-field">
+            <label for="cultivo-variedad">Variedad</label>
+            <input type="text" name="variedad" id="cultivo-variedad" placeholder="Ej. Roma" maxlength="100">
+            <p class="form-field-hint">Opcional.</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="cultivo-siembra">Fecha de siembra</label>
+            <input type="date" name="fecha_siembra" id="cultivo-siembra" required>
+          </div>
+          <div class="form-field">
+            <label for="cultivo-cosecha">Cosecha estimada</label>
+            <input type="date" name="fecha_cosecha_estimada" id="cultivo-cosecha">
+            <p class="form-field-hint">Opcional; no puede ser antes de la siembra.</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="cultivo-cantidad">Cantidad</label>
+            <input type="number" name="cantidad" id="cultivo-cantidad" min="0.01" step="0.01" placeholder="Ej. 1200" required>
+          </div>
+          <div class="form-field">
+            <label for="cultivo-unidad">Unidad</label>
+            <select name="unidad" id="cultivo-unidad" required>
+              <% unidades.forEach(u => { %>
+                <option value="<%= u %>"><%= u.charAt(0).toUpperCase() + u.slice(1) %></option>
+              <% }) %>
+            </select>
+          </div>
+        </div>
+        <div class="form-field">
+          <label for="cultivo-estado">Estado</label>
+          <select name="estado" id="cultivo-estado" required>
+            <% Object.entries(estados).forEach(([valor, texto]) => { %>
+              <option value="<%= valor %>"><%= texto %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="cultivo-notas">Notas</label>
+          <textarea name="notas" id="cultivo-notas" rows="3" placeholder="Ej. Riego por goteo, fertilizado el 15/09"></textarea>
+          <p class="form-field-hint">Opcional.</p>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="cerrarModalCultivo()">Cancelar</button>
+          <button type="submit" class="btn-primary" id="cultivo-guardar">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('.row-actions.open').forEach((el) => {
+        if (!el.contains(e.target)) el.classList.remove('open');
+      });
+    });
+
+    // "en N días" se calcula con la fecha local del navegador: en el
+    // servidor (UTC) ya es el día siguiente durante la tarde/noche en Guatemala.
+    (function diasParaCosecha() {
+      const hoy = new Date();
+      const hoyUTC = Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+      document.querySelectorAll('[data-cosecha]').forEach((el) => {
+        const [a, m, d] = el.dataset.cosecha.split('-').map(Number);
+        const dias = Math.round((Date.UTC(a, m - 1, d) - hoyUTC) / 86400000);
+        const plural = (n) => n + (n === 1 ? ' día' : ' días');
+        el.textContent = dias === 0 ? 'hoy' : dias > 0 ? 'en ' + plural(dias) : 'vencida hace ' + plural(-dias);
+        el.classList.toggle('cell-sub--alerta', dias < 0);
+      });
+    })();
+
+    // --- Filtros: cambian la lista al instante; la parcela se limita a la finca elegida ---
+    const formFiltros = document.getElementById('form-filtros');
+    const filtroFinca = document.getElementById('filtro-finca');
+    const filtroParcela = document.getElementById('filtro-parcela');
+
+    function limitarParcelas() {
+      [...filtroParcela.options].forEach((o) => {
+        if (!o.value) return;
+        o.hidden = filtroFinca.value !== '' && o.dataset.finca !== filtroFinca.value;
+      });
+    }
+    limitarParcelas();
+
+    filtroFinca.addEventListener('change', () => {
+      // si la parcela elegida es de otra finca, se quita ese filtro
+      const elegida = filtroParcela.selectedOptions[0];
+      if (filtroFinca.value && elegida && elegida.value && elegida.dataset.finca !== filtroFinca.value) {
+        filtroParcela.value = '';
+      }
+      formFiltros.submit();
+    });
+    filtroParcela.addEventListener('change', () => formFiltros.submit());
+    document.getElementById('filtro-estado').addEventListener('change', () => formFiltros.submit());
+
+    // --- Modal de crear / editar ---
+    const modal = document.getElementById('modal-cultivo');
+    const form = document.getElementById('form-cultivo');
+    const campos = {
+      parcela_id: document.getElementById('cultivo-parcela'),
+      tipo: document.getElementById('cultivo-tipo'),
+      variedad: document.getElementById('cultivo-variedad'),
+      fecha_siembra: document.getElementById('cultivo-siembra'),
+      fecha_cosecha_estimada: document.getElementById('cultivo-cosecha'),
+      cantidad: document.getElementById('cultivo-cantidad'),
+      unidad: document.getElementById('cultivo-unidad'),
+      estado: document.getElementById('cultivo-estado'),
+      notas: document.getElementById('cultivo-notas'),
+    };
+
+    function llenarFormulario(datos, id) {
+      form.action = id ? '/cultivos/' + id + '/editar' : '/cultivos';
+      document.getElementById('cultivo-titulo').innerHTML = id
+        ? '<i class="bi bi-pencil-fill"></i> Editar cultivo'
+        : '<i class="bi bi-flower1"></i> Nuevo cultivo';
+      document.getElementById('cultivo-guardar').textContent = id ? 'Guardar cambios' : 'Guardar';
+      Object.entries(campos).forEach(([nombre, el]) => {
+        el.value = datos[nombre] ?? '';
+      });
+      if (!campos.unidad.value) campos.unidad.value = 'plantas';
+      if (!campos.estado.value) campos.estado.value = 'sembrado';
+      if (datos.cantidad) campos.cantidad.value = Number(datos.cantidad);
+      campos.fecha_cosecha_estimada.min = campos.fecha_siembra.value;
+      modal.classList.add('open');
+      campos.tipo.focus();
+    }
+
+    function abrirNuevoCultivo() {
+      // Si la lista está filtrada por una parcela, se propone esa misma
+      const parcelaFiltrada = filtroParcela.value || '';
+      llenarFormulario({ parcela_id: parcelaFiltrada, fecha_siembra: new Date().toLocaleDateString('en-CA') }, null);
+    }
+
+    function abrirEditarCultivo(btn) {
+      const c = JSON.parse(btn.dataset.cultivo);
+      llenarFormulario(c, c.id);
+    }
+
+    function cerrarModalCultivo() {
+      modal.classList.remove('open');
+    }
+
+    // La cosecha estimada no puede ser antes de la siembra
+    campos.fecha_siembra.addEventListener('change', () => {
+      campos.fecha_cosecha_estimada.min = campos.fecha_siembra.value;
+    });
+
+    <% if (formulario) { %>
+      // Volver a abrir el formulario que la API rechazó, con lo ya escrito
+      llenarFormulario(<%- JSON.stringify(formulario).replace(/</g, '\\u003c') %>, <%- formulario.id ? JSON.stringify(String(formulario.id)) : 'null' %>);
+    <% } %>
+  </script>
+</body>
+</html>
