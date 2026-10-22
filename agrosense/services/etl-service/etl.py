@@ -91,9 +91,16 @@ def ejecutar_job():
 
 
 if __name__ == "__main__":
-    # Corre una vez al iniciar y luego según el cron definido en ETL_SCHEDULE_CRON (por defecto cada hora)
+    # Corre una vez al iniciar y luego cada ETL_INTERVAL_MINUTES (por defecto 60;
+    # en desarrollo docker-compose.yml lo pone en 5 para que la gráfica del
+    # dashboard se refresque durante la demo)
+    try:
+        intervalo = max(1, int(os.getenv("ETL_INTERVAL_MINUTES", "60")))
+    except ValueError:
+        intervalo = 60
+    print(f"[ETL] Corriendo cada {intervalo} minutos.")
     ejecutar_job()
-    schedule.every(1).hours.do(ejecutar_job)
+    schedule.every(intervalo).minutes.do(ejecutar_job)
 
     while True:
         schedule.run_pending()
