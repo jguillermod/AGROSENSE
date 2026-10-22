@@ -41,6 +41,11 @@
           <div class="stat-value"><%= resumen.cultivos_activos || 0 %></div>
           <div class="stat-label">Cultivos activos</div>
         </a>
+        <a href="/riego" class="stat-card stat-card--blue stat-card--link">
+          <i class="bi bi-droplet-half stat-icon"></i>
+          <div class="stat-value"><%= resumen.riegos_en_curso || 0 %></div>
+          <div class="stat-label">Riegos en curso</div>
+        </a>
       </div>
 
       <div class="panel-dark">

@@ -334,6 +334,45 @@ class DataService {
     _checkOk(res, 'No se pudo eliminar el cultivo');
   }
 
+  // --- Riego ---
+  // Igual que cultivos: el usuario_id viaja siempre y fincas-service rechaza
+  // las parcelas que un agrónomo no tenga asignadas.
+
+  Future<RiegoResumen> getRiegoParcela(int parcelaId, {required int usuarioId}) async {
+    final res = await http.get(
+      Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/riego?usuario_id=$usuarioId'),
+    );
+    _checkOk(res, 'No se pudo cargar el riego de la parcela');
+    return RiegoResumen.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  Future<void> regarAhora(int parcelaId, {required int duracionMinutos, required int usuarioId}) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/riego/iniciar'),
+      headers: _jsonHeaders,
+      body: jsonEncode({'duracion_minutos': duracionMinutos, 'usuario_id': usuarioId}),
+    );
+    _checkCreated(res, 'No se pudo iniciar el riego');
+  }
+
+  Future<void> detenerRiego(int parcelaId, {required int usuarioId}) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/riego/detener'),
+      headers: _jsonHeaders,
+      body: jsonEncode({'usuario_id': usuarioId}),
+    );
+    _checkOk(res, 'No se pudo detener el riego');
+  }
+
+  Future<void> setRiegoAutomatico(int parcelaId, {required bool activo, required int usuarioId}) async {
+    final res = await http.put(
+      Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/riego-automatico'),
+      headers: _jsonHeaders,
+      body: jsonEncode({'activo': activo, 'usuario_id': usuarioId}),
+    );
+    _checkOk(res, 'No se pudo cambiar el riego automático');
+  }
+
   // --- Dashboard ---
 
   /// Con [usuarioId], el contador de cultivos activos de un agrónomo se

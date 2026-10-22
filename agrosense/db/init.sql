@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS parcelas (
     humedad_min DECIMAL(5,2) DEFAULT 30.00,
     humedad_max DECIMAL(5,2) DEFAULT 85.00,
     temperatura_max DECIMAL(5,2) DEFAULT 38.00,
+    -- Si está activo, el motor de riego riega solo cuando la humedad baja del mínimo
+    riego_automatico BOOLEAN NOT NULL DEFAULT FALSE,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (finca_id) REFERENCES fincas(id)
 );
@@ -120,6 +122,40 @@ CREATE TABLE IF NOT EXISTS cultivos (
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE,
     INDEX idx_cultivos_estado (estado)
+);
+
+-- Programación de riego por parcela (copia de db/migrations/002_riego.sql).
+-- dias_semana: letras separadas por coma, L,M,X,J,V,S,D (X = miércoles).
+-- hora_inicio y duracion_minutos se interpretan con el reloj del motor de
+-- riego (el simulado durante la demo, el real en producción).
+CREATE TABLE IF NOT EXISTS riego_programaciones (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    parcela_id INT NOT NULL,
+    nombre VARCHAR(100) NOT NULL,
+    dias_semana VARCHAR(20) NOT NULL,
+    hora_inicio TIME NOT NULL,
+    duracion_minutos INT NOT NULL,
+    activa BOOLEAN NOT NULL DEFAULT TRUE,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE
+);
+
+-- Bitácora de riegos. inicio/fin son DATETIME (sin zona horaria) en el
+-- mismo reloj del motor; creado_en es la hora real de registro.
+CREATE TABLE IF NOT EXISTS riego_eventos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    parcela_id INT NOT NULL,
+    programacion_id INT NULL,
+    origen ENUM('programado', 'manual', 'automatico') NOT NULL,
+    inicio DATETIME NOT NULL,
+    fin DATETIME NULL,
+    duracion_minutos INT NOT NULL,
+    estado ENUM('en_curso', 'completado', 'cancelado') NOT NULL DEFAULT 'en_curso',
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE,
+    FOREIGN KEY (programacion_id) REFERENCES riego_programaciones(id) ON DELETE SET NULL,
+    INDEX idx_riego_eventos_estado (estado),
+    INDEX idx_riego_eventos_parcela_inicio (parcela_id, inicio)
 );
 
 -- Tabla que llena el servicio ETL con los resúmenes diarios

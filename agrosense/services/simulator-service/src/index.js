@@ -34,6 +34,11 @@ app.get("/status", (req, res) => {
   res.json(simulador.status());
 });
 
+// Hora simulada para el motor de riego de fincas-service
+app.get("/reloj", (req, res) => {
+  res.json(simulador.relojPublico());
+});
+
 app.post("/scenario", (req, res) => {
   const { nombre } = req.body || {};
   if (!ESCENARIOS.includes(nombre)) {

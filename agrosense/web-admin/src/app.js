@@ -152,7 +152,7 @@ app.get("/dashboard", requireAuth, async (req, res) => {
     console.error(err.message);
     res.render("dashboard", {
       active: "dashboard",
-      resumen: { estaciones_activas: 0, alertas_hoy: 0, humedad_promedio: 0, temperatura_promedio: 0, cultivos_activos: 0 },
+      resumen: { estaciones_activas: 0, alertas_hoy: 0, humedad_promedio: 0, temperatura_promedio: 0, cultivos_activos: 0, riegos_en_curso: 0 },
       historial: [],
     });
   }
@@ -289,7 +289,13 @@ const CAMPOS_CULTIVO = [
 async function parcelasDisponibles(usuario) {
   const url = usuario.rol === "agronomo" ? `/api/usuarios/${usuario.id}/parcelas` : "/api/parcelas";
   const { data } = await axios.get(`${FINCAS_URL}${url}`);
-  return data.map((p) => ({ id: p.id, nombre: p.nombre, finca_id: p.finca_id, finca_nombre: p.finca_nombre }));
+  return data.map((p) => ({
+    id: p.id,
+    nombre: p.nombre,
+    finca_id: p.finca_id,
+    finca_nombre: p.finca_nombre,
+    riego_automatico: Boolean(p.riego_automatico),
+  }));
 }
 
 function filtrosCultivos(fuente) {
@@ -390,6 +396,208 @@ app.post("/cultivos/:id/eliminar", requireAuth, async (req, res) => {
     console.error(err.message);
     const mensaje = err.response?.data?.error || "No se pudo eliminar el cultivo";
     res.render("cultivos", await cargarCultivosView(req.usuario, filtros, { error: mensaje }));
+  }
+});
+
+// --- Programación de riego ---
+// Mismos permisos que cultivos: el agrónomo solo ve y opera sus parcelas
+// asignadas, y el usuario_id viaja en cada petición para que fincas-service
+// aplique la regla también al escribir.
+
+function filtrosRiego(fuente) {
+  return {
+    finca: fuente.finca || "",
+    b_parcela: fuente.b_parcela || "",
+    desde: fuente.desde || "",
+    hasta: fuente.hasta || "",
+    origen: fuente.origen || "",
+  };
+}
+
+// Las acciones vuelven a la misma vista (con sus filtros); solo se aceptan
+// rutas de /riego para no convertir el formulario en una redirección abierta.
+function volverARiego(valor) {
+  return typeof valor === "string" && /^\/riego(\?|$)/.test(valor) ? valor : "/riego";
+}
+
+async function humedadPorParcela(usuario, parcelas) {
+  const filas =
+    usuario.rol === "agronomo"
+      ? (await axios.get(`${FINCAS_URL}/api/usuarios/${usuario.id}/parcelas`)).data
+      : (
+          await Promise.all(
+            [...new Set(parcelas.map((p) => p.finca_id))].map((fincaId) =>
+              axios.get(`${FINCAS_URL}/api/fincas/${fincaId}/parcelas`).then((r) => r.data)
+            )
+          )
+        ).flat();
+  const mapa = {};
+  filas.forEach((p) => (mapa[p.id] = { humedad: p.humedad_actual, humedad_min: Number(p.humedad_min) }));
+  return mapa;
+}
+
+async function cargarRiegoView(usuario, filtros, extra = {}) {
+  const params = { usuario_id: usuario.id };
+  const paramsBitacora = { ...params, limit: 100 };
+  if (filtros.b_parcela) paramsBitacora.parcela_id = filtros.b_parcela;
+  if (filtros.desde) paramsBitacora.desde = filtros.desde;
+  if (filtros.hasta) paramsBitacora.hasta = filtros.hasta;
+  if (filtros.origen) paramsBitacora.origen = filtros.origen;
+
+  const parcelas = await parcelasDisponibles(usuario);
+  const [activos, programaciones, eventos, reloj, humedades] = await Promise.all([
+    axios.get(`${FINCAS_URL}/api/riego/activos`, { params }).then((r) => r.data),
+    axios.get(`${FINCAS_URL}/api/riego/programaciones`, { params }).then((r) => r.data),
+    axios.get(`${FINCAS_URL}/api/riego/eventos`, { params: paramsBitacora }).then((r) => r.data),
+    axios.get(`${FINCAS_URL}/api/riego/reloj`).then((r) => r.data).catch(() => null),
+    humedadPorParcela(usuario, parcelas).catch(() => ({})),
+  ]);
+
+  const fincas = [];
+  parcelas.forEach((p) => {
+    if (!fincas.some((f) => f.id === p.finca_id)) fincas.push({ id: p.finca_id, nombre: p.finca_nombre });
+  });
+  const visibles = filtros.finca ? parcelas.filter((p) => String(p.finca_id) === filtros.finca) : parcelas;
+
+  return {
+    active: "riego",
+    parcelas,
+    fincas,
+    estadoParcelas: visibles.map((p) => {
+      const propias = programaciones.filter((g) => g.parcela_id === p.id && g.proxima_ejecucion);
+      propias.sort((a, b) => a.proxima_ejecucion.localeCompare(b.proxima_ejecucion));
+      return {
+        ...p,
+        ...(humedades[p.id] || {}),
+        riegoEnCurso: activos.find((a) => a.parcela_id === p.id) || null,
+        proxima: propias[0] || null,
+      };
+    }),
+    programaciones: filtros.finca ? programaciones.filter((g) => String(g.finca_id) === filtros.finca) : programaciones,
+    eventos,
+    reloj,
+    filtros,
+    volver: urlRiego(filtros),
+    error: null,
+    formulario: null,
+    ...extra,
+  };
+}
+
+function urlRiego(filtros) {
+  const query = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v)).toString();
+  return query ? `/riego?${query}` : "/riego";
+}
+
+// Errores de la API: se vuelve a mostrar la vista con el mensaje (y con el
+// formulario de programación abierto si venía de ahí)
+async function renderErrorRiego(req, res, err, fallback, formulario = null) {
+  console.error(err.message);
+  const mensaje = err.response?.data?.error || fallback;
+  const volver = volverARiego(req.body.volver);
+  const filtros = filtrosRiego(Object.fromEntries(new URL(volver, "http://x").searchParams));
+  try {
+    res.render("riego", await cargarRiegoView(req.usuario, filtros, { error: mensaje, formulario }));
+  } catch (e) {
+    console.error(e.message);
+    res.redirect(volver);
+  }
+}
+
+app.get("/riego", requireAuth, async (req, res) => {
+  const filtros = filtrosRiego(req.query);
+  try {
+    res.render("riego", await cargarRiegoView(req.usuario, filtros));
+  } catch (err) {
+    console.error(err.message);
+    res.render("riego", {
+      active: "riego", parcelas: [], fincas: [], estadoParcelas: [], programaciones: [], eventos: [], reloj: null,
+      filtros, volver: urlRiego(filtros), error: "No se pudo cargar la información de riego", formulario: null,
+    });
+  }
+});
+
+function datosProgramacion(body, usuarioId) {
+  return {
+    usuario_id: usuarioId,
+    parcela_id: body.parcela_id,
+    nombre: body.nombre,
+    dias_semana: body.dias_semana || "",
+    hora_inicio: body.hora_inicio,
+    duracion_minutos: body.duracion_minutos,
+    activa: body.activa === "1",
+  };
+}
+
+app.post("/riego/programaciones", requireAuth, async (req, res) => {
+  try {
+    await axios.post(`${FINCAS_URL}/api/riego/programaciones`, datosProgramacion(req.body, req.usuario.id));
+    res.redirect(volverARiego(req.body.volver));
+  } catch (err) {
+    await renderErrorRiego(req, res, err, "No se pudo crear la programación", { ...req.body, id: null });
+  }
+});
+
+app.post("/riego/programaciones/:id/editar", requireAuth, async (req, res) => {
+  try {
+    await axios.put(`${FINCAS_URL}/api/riego/programaciones/${req.params.id}`, datosProgramacion(req.body, req.usuario.id));
+    res.redirect(volverARiego(req.body.volver));
+  } catch (err) {
+    await renderErrorRiego(req, res, err, "No se pudo editar la programación", { ...req.body, id: req.params.id });
+  }
+});
+
+app.post("/riego/programaciones/:id/activa", requireAuth, async (req, res) => {
+  try {
+    await axios.put(`${FINCAS_URL}/api/riego/programaciones/${req.params.id}/activa`, {
+      activa: req.body.activa === "1",
+      usuario_id: req.usuario.id,
+    });
+    res.redirect(volverARiego(req.body.volver));
+  } catch (err) {
+    await renderErrorRiego(req, res, err, "No se pudo cambiar el estado de la programación");
+  }
+});
+
+app.post("/riego/programaciones/:id/eliminar", requireAuth, async (req, res) => {
+  try {
+    await axios.delete(`${FINCAS_URL}/api/riego/programaciones/${req.params.id}`, { params: { usuario_id: req.usuario.id } });
+    res.redirect(volverARiego(req.body.volver));
+  } catch (err) {
+    await renderErrorRiego(req, res, err, "No se pudo eliminar la programación");
+  }
+});
+
+app.post("/riego/parcelas/:id/iniciar", requireAuth, async (req, res) => {
+  try {
+    await axios.post(`${FINCAS_URL}/api/parcelas/${req.params.id}/riego/iniciar`, {
+      duracion_minutos: req.body.duracion_minutos,
+      usuario_id: req.usuario.id,
+    });
+    res.redirect(volverARiego(req.body.volver));
+  } catch (err) {
+    await renderErrorRiego(req, res, err, "No se pudo iniciar el riego");
+  }
+});
+
+app.post("/riego/parcelas/:id/detener", requireAuth, async (req, res) => {
+  try {
+    await axios.post(`${FINCAS_URL}/api/parcelas/${req.params.id}/riego/detener`, { usuario_id: req.usuario.id });
+    res.redirect(volverARiego(req.body.volver));
+  } catch (err) {
+    await renderErrorRiego(req, res, err, "No se pudo detener el riego");
+  }
+});
+
+app.post("/riego/parcelas/:id/automatico", requireAuth, async (req, res) => {
+  try {
+    await axios.put(`${FINCAS_URL}/api/parcelas/${req.params.id}/riego-automatico`, {
+      activo: req.body.activo === "1",
+      usuario_id: req.usuario.id,
+    });
+    res.redirect(volverARiego(req.body.volver));
+  } catch (err) {
+    await renderErrorRiego(req, res, err, "No se pudo cambiar el riego automático");
   }
 });
 

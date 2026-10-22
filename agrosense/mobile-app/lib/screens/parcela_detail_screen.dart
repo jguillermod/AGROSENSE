@@ -8,6 +8,7 @@ import '../services/data_service.dart';
 import '../widgets/common.dart';
 import 'cultivos_screen.dart';
 import 'historial_screen.dart';
+import '../widgets/riego_section.dart';
 
 class ParcelaDetailScreen extends StatefulWidget {
   final Parcela parcela;
@@ -25,6 +26,7 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
   late Future<List<Estacion>> _estacionesFuture;
   late Future<List<RegistroManual>> _registrosFuture;
   late Future<List<Cultivo>> _cultivosFuture;
+  final _riegoKey = GlobalKey<RiegoSectionState>();
 
   @override
   void initState() {
@@ -175,7 +177,13 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
             _registrosFuture = _dataService.getRegistros(parcela.id);
             _cultivosFuture = _cargarCultivos();
           });
-          await Future.wait([_alertasFuture, _estacionesFuture, _registrosFuture, _cultivosFuture]);
+          await Future.wait([
+            _alertasFuture,
+            _estacionesFuture,
+            _registrosFuture,
+            _cultivosFuture,
+            _riegoKey.currentState?.recargar() ?? Future.value(),
+          ]);
         },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
@@ -183,6 +191,10 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
             _buildResumenCard(parcela),
             const SizedBox(height: 20),
             _buildUmbralesCard(parcela),
+            const SizedBox(height: 20),
+            const Text('Riego', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.darkGreen)),
+            const SizedBox(height: 8),
+            RiegoSection(key: _riegoKey, parcela: parcela),
             const SizedBox(height: 20),
             const Text('Cultivos', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.darkGreen)),
             const SizedBox(height: 8),

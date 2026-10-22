@@ -184,6 +184,7 @@ async function prepararDatosDemo() {
       humedad_min: Number(p.humedad_min),
       humedad_max: Number(p.humedad_max),
       temperatura_max: Number(p.temperatura_max),
+      riego_automatico: Boolean(p.riego_automatico),
       estaciones,
     });
   }

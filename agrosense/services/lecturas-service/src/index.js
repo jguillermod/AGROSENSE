@@ -57,6 +57,16 @@ app.post("/api/lecturas", async (req, res) => {
       else if (humedad_suelo > p.humedad_max) alerta = "Riesgo de exceso de humedad";
       else if (temperatura > p.temperatura_max) alerta = "Riesgo de estrés hídrico por calor";
 
+      // Si la parcela ya se está regando, "Necesita riego" no aporta nada:
+      // la humedad tarda unas lecturas en recuperarse y solo llenaría de ruido.
+      if (alerta === "Necesita riego") {
+        const [regando] = await pool.query(
+          "SELECT 1 FROM riego_eventos WHERE parcela_id = ? AND estado = 'en_curso' LIMIT 1",
+          [p.parcela_id]
+        );
+        if (regando.length > 0) alerta = null;
+      }
+
       if (alerta) {
         await pool.query(
           `INSERT INTO alertas (parcela_id, estacion_id, tipo, fecha) VALUES (?, ?, ?, NOW())`,

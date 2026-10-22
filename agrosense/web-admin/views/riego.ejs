@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <%- include('partials/head', { titulo: 'Riego' }) %>
+</head>
+<body>
+  <%
+    const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    const DIAS_CORTOS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+    const DIAS_LARGOS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    const LETRAS = [['L', 'Lun'], ['M', 'Mar'], ['X', 'Mié'], ['J', 'Jue'], ['V', 'Vie'], ['S', 'Sáb'], ['D', 'Dom']];
+    // Fechas "de pared" del reloj del motor ("YYYY-MM-DD HH:MM[:SS]"), sin pasar por la zona horaria
+    const partes = (v) => {
+      const [f, h] = String(v).split(' ');
+      const [a, m, d] = f.split('-').map(Number);
+      return { a, m, d, h: (h || '').slice(0, 5), dia: new Date(Date.UTC(a, m - 1, d)).getUTCDay() };
+    };
+    const fechaHora = (v) => { if (!v) return '—'; const p = partes(v); return `${DIAS_CORTOS[p.dia]} ${p.d} ${MESES[p.m - 1]}, ${p.h}`; };
+    const soloHora = (v) => (v ? partes(v).h : '—');
+    const ORIGENES = { programado: 'Programado', manual: 'Manual', automatico: 'Automático' };
+    const BADGE_ORIGEN = { programado: 'badge--info', manual: 'badge--neutral', automatico: 'badge--success' };
+    const ESTADOS = { en_curso: 'En curso', completado: 'Completado', cancelado: 'Detenido' };
+    const BADGE_ESTADO = { en_curso: 'badge--info', completado: 'badge--success', cancelado: 'badge--warning' };
+    const relojTexto = reloj ? (() => { const p = partes(reloj.fecha_hora); return `${DIAS_LARGOS[p.dia]} ${p.d} ${MESES[p.m - 1]}, ${p.h}`; })() : null;
+  %>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
+
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Programación de riego</h2>
+          <p class="page-subtitle" id="riego-reloj">
+            <% if (reloj && reloj.modo === 'simulado') { %>
+              <i class="bi bi-clock-history"></i> Reloj de la simulación: <strong><%= relojTexto %></strong>
+              · x<%= reloj.escala %><%= reloj.pausado ? ' · en pausa' : '' %>
+            <% } else if (reloj) { %>
+              <i class="bi bi-clock"></i> Hora local: <strong><%= relojTexto %></strong>
+            <% } else { %>
+              <span class="text-alerta"><i class="bi bi-exclamation-triangle-fill"></i> El reloj de la simulación no responde: los riegos no avanzan hasta que vuelva el simulador.</span>
+            <% } %>
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <form method="GET" action="/riego">
+            <label class="sr-only" for="filtro-finca">Finca</label>
+            <select class="finca-select" name="finca" id="filtro-finca" onchange="this.form.submit()">
+              <option value="">Todas las fincas</option>
+              <% fincas.forEach(f => { %>
+                <option value="<%= f.id %>" <%= String(f.id) === filtros.finca ? 'selected' : '' %>><%= f.nombre %></option>
+              <% }) %>
+            </select>
+          </form>
+          <button class="btn-primary" <%= parcelas.length ? '' : 'disabled' %> onclick="abrirNuevaProgramacion()">
+            <i class="bi bi-plus-lg"></i> Nueva programación
+          </button>
+        </div>
+      </div>
+
+      <% if (error) { %>
+        <p class="auth-message auth-message--error"><%= error %></p>
+      <% } %>
+
+      <!-- (a) Estado y acciones por parcela -->
+      <section id="riego-estado">
+        <h3 class="section-title section-title--first">Estado por parcela</h3>
+        <% if (estadoParcelas.length === 0) { %>
+          <div class="data-table-wrap"><p class="data-table-empty">
+            <%= locals.usuario && locals.usuario.rol === 'agronomo' ? 'Todavía no tienes parcelas asignadas.' : 'No hay parcelas registradas.' %>
+          </p></div>
+        <% } %>
+        <div class="riego-grid">
+          <% estadoParcelas.forEach(p => {
+            const r = p.riegoEnCurso;
+            const humedad = p.humedad != null ? Number(p.humedad) : null;
+            const seca = humedad != null && p.humedad_min != null && humedad < p.humedad_min;
+          %>
+            <div class="riego-card <%= r ? 'riego-card--activo' : '' %>">
+              <div class="riego-card-head">
+                <div>
+                  <strong><%= p.nombre %></strong>
+                  <div class="cell-sub"><%= p.finca_nombre %></div>
+                </div>
+                <% if (r) { %>
+                  <span class="riego-estado riego-estado--activo"><i class="bi bi-droplet-fill"></i> Regando</span>
+                <% } else { %>
+                  <span class="riego-estado"><i class="bi bi-pause-circle"></i> En espera</span>
+                <% } %>
+              </div>
+
+              <div class="riego-dato">
+                <span>Humedad actual</span>
+                <strong class="<%= seca ? 'text-alerta' : '' %>">
+                  <%= humedad != null ? humedad.toFixed(1) + '%' : 'Sin lecturas' %>
+                  <% if (p.humedad_min != null) { %><small>(mín. <%= p.humedad_min %>%)</small><% } %>
+                </strong>
+              </div>
+
+              <% if (r) { %>
+                <div class="riego-dato">
+                  <span><%= ORIGENES[r.origen] %><%= r.programacion_nombre ? ' · ' + r.programacion_nombre : '' %></span>
+                  <strong>desde <%= soloHora(r.inicio) %> hasta <%= soloHora(r.fin_previsto) %></strong>
+                </div>
+                <form method="POST" action="/riego/parcelas/<%= p.id %>/detener" class="riego-accion">
+                  <input type="hidden" name="volver" value="<%= volver %>">
+                  <button type="submit" class="btn-secondary btn-danger-soft"><i class="bi bi-stop-circle"></i> Detener</button>
+                </form>
+              <% } else { %>
+                <form method="POST" action="/riego/parcelas/<%= p.id %>/iniciar" class="riego-accion">
+                  <input type="hidden" name="volver" value="<%= volver %>">
+                  <label class="sr-only" for="duracion-<%= p.id %>">Duración en minutos</label>
+                  <input type="number" name="duracion_minutos" id="duracion-<%= p.id %>" value="30" min="1" max="720" required class="riego-minutos">
+                  <span class="riego-min-label">min</span>
+                  <button type="submit" class="btn-primary"><i class="bi bi-droplet"></i> Regar ahora</button>
+                </form>
+              <% } %>
+
+              <form method="POST" action="/riego/parcelas/<%= p.id %>/automatico" class="riego-switch">
+                <input type="hidden" name="volver" value="<%= volver %>">
+                <input type="hidden" name="activo" value="<%= p.riego_automatico ? '0' : '1' %>">
+                <label class="switch">
+                  <input type="checkbox" <%= p.riego_automatico ? 'checked' : '' %> onchange="this.form.submit()">
+                  <span class="switch-track"></span>
+                  <span>Riego automático</span>
+                </label>
+                <p class="form-field-hint">
+                  <%= p.riego_automatico ? 'Activo: ' : 'Si lo activas, ' %>riega solo cuando la humedad baja<%= p.humedad_min != null ? ' de ' + p.humedad_min + '%' : ' del mínimo' %>.
+                </p>
+              </form>
+
+              <div class="riego-proxima">
+                <i class="bi bi-calendar-event"></i>
+                <% if (p.proxima) { %>
+                  Próximo: <strong><%= fechaHora(p.proxima.proxima_ejecucion) %></strong> · <%= p.proxima.nombre %> (<%= p.proxima.duracion_minutos %> min)
+                <% } else { %>
+                  Sin programaciones activas
+                <% } %>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      </section>
+
+      <!-- (b) Programaciones -->
+      <h3 class="section-title">Programaciones</h3>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Parcela</th><th>Nombre</th><th>Días</th><th>Hora</th><th>Duración</th><th>Estado</th><th>Próxima ejecución</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% if (programaciones.length === 0) { %>
+              <tr><td colspan="8" class="data-table-empty">Todavía no hay programaciones. Crea una con "Nueva programación".</td></tr>
+            <% } %>
+            <% programaciones.forEach(g => { const dias = g.dias_semana.split(','); %>
+              <tr>
+                <td><%= g.parcela_nombre %><div class="cell-sub"><%= g.finca_nombre %></div></td>
+                <td><strong><%= g.nombre %></strong></td>
+                <td>
+                  <div class="dias-chips">
+                    <% LETRAS.forEach(([letra, texto]) => { %>
+                      <span class="dia-chip <%= dias.includes(letra) ? 'dia-chip--on' : '' %>" title="<%= texto %>"><%= letra %></span>
+                    <% }) %>
+                  </div>
+                </td>
+                <td><%= g.hora_inicio %></td>
+                <td><%= g.duracion_minutos %> min</td>
+                <td><span class="badge <%= g.activa ? 'badge--success' : 'badge--neutral' %>"><%= g.activa ? 'Activa' : 'Pausada' %></span></td>
+                <td><%= g.activa ? fechaHora(g.proxima_ejecucion) : '—' %></td>
+                <td class="row-actions">
+                  <button class="menu-trigger" onclick="this.parentElement.classList.toggle('open')" aria-label="Acciones">
+                    <i class="bi bi-three-dots-vertical"></i>
+                  </button>
+                  <div class="menu-dropdown">
+                    <button type="button" class="menu-item" data-programacion="<%= JSON.stringify(g) %>" onclick="abrirEditarProgramacion(this)">
+                      <i class="bi bi-pencil-fill"></i> Editar
+                    </button>
+                    <form method="POST" action="/riego/programaciones/<%= g.id %>/activa">
+                      <input type="hidden" name="volver" value="<%= volver %>">
+                      <input type="hidden" name="activa" value="<%= g.activa ? '0' : '1' %>">
+                      <button type="submit" class="menu-item">
+                        <i class="bi <%= g.activa ? 'bi-pause-fill' : 'bi-play-fill' %>"></i> <%= g.activa ? 'Pausar' : 'Activar' %>
+                      </button>
+                    </form>
+                    <form method="POST" action="/riego/programaciones/<%= g.id %>/eliminar"
+                      onsubmit="return confirm('¿Eliminar la programación &quot;<%= g.nombre %>&quot;? Los riegos que ya hizo quedan en la bitácora.')">
+                      <input type="hidden" name="volver" value="<%= volver %>">
+                      <button type="submit" class="menu-item danger"><i class="bi bi-trash-fill"></i> Eliminar</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- (d) Bitácora -->
+      <section id="riego-bitacora">
+        <h3 class="section-title">Bitácora de riegos</h3>
+        <form class="filter-bar" method="GET" action="/riego">
+          <input type="hidden" name="finca" value="<%= filtros.finca %>">
+          <div class="form-field">
+            <label for="b-parcela">Parcela</label>
+            <select class="finca-select" name="b_parcela" id="b-parcela" onchange="this.form.submit()">
+              <option value="">Todas</option>
+              <% parcelas.forEach(p => { %>
+                <option value="<%= p.id %>" <%= String(p.id) === filtros.b_parcela ? 'selected' : '' %>><%= p.finca_nombre %> · <%= p.nombre %></option>
+              <% }) %>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="b-desde">Desde</label>
+            <input class="finca-select" type="date" name="desde" id="b-desde" value="<%= filtros.desde %>" onchange="this.form.submit()">
+          </div>
+          <div class="form-field">
+            <label for="b-hasta">Hasta</label>
+            <input class="finca-select" type="date" name="hasta" id="b-hasta" value="<%= filtros.hasta %>" onchange="this.form.submit()">
+          </div>
+          <div class="form-field">
+            <label for="b-origen">Origen</label>
+            <select class="finca-select" name="origen" id="b-origen" onchange="this.form.submit()">
+              <option value="">Todos</option>
+              <% Object.entries(ORIGENES).forEach(([valor, texto]) => { %>
+                <option value="<%= valor %>" <%= valor === filtros.origen ? 'selected' : '' %>><%= texto %></option>
+              <% }) %>
+            </select>
+          </div>
+          <% if (filtros.b_parcela || filtros.desde || filtros.hasta || filtros.origen) { %>
+            <a class="filter-clear" href="<%= filtros.finca ? '/riego?finca=' + filtros.finca : '/riego' %>"><i class="bi bi-x-circle"></i> Limpiar filtros</a>
+          <% } %>
+        </form>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Parcela</th><th>Origen</th><th>Inicio</th><th>Fin</th><th>Duración</th><th>Estado</th></tr>
+            </thead>
+            <tbody>
+              <% if (eventos.length === 0) { %>
+                <tr><td colspan="6" class="data-table-empty">No hay riegos registrados con estos filtros.</td></tr>
+              <% } %>
+              <% eventos.forEach(e => { %>
+                <tr>
+                  <td><%= e.parcela_nombre %><div class="cell-sub"><%= e.finca_nombre %></div></td>
+                  <td>
+                    <span class="badge <%= BADGE_ORIGEN[e.origen] %>"><%= ORIGENES[e.origen] %></span>
+                    <% if (e.programacion_nombre) { %><div class="cell-sub"><%= e.programacion_nombre %></div><% } %>
+                  </td>
+                  <td><%= fechaHora(e.inicio) %></td>
+                  <td><%= e.fin ? fechaHora(e.fin) : 'previsto ' + soloHora(e.fin_previsto) %></td>
+                  <td><%= e.duracion_minutos %> min</td>
+                  <td><span class="badge <%= BADGE_ESTADO[e.estado] %>"><%= ESTADOS[e.estado] %></span></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+        <p class="live-legend">Las horas son las del <%= reloj && reloj.modo === 'simulado' ? 'reloj de la simulación (avanza x' + reloj.escala + ')' : 'reloj del motor de riego' %>. Se muestran los últimos 100 riegos.</p>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-programacion">
+    <div class="modal-box modal-box--wide">
+      <h3 id="programacion-titulo"><i class="bi bi-calendar-plus"></i> Nueva programación</h3>
+      <form method="POST" id="form-programacion" action="/riego/programaciones">
+        <input type="hidden" name="volver" value="<%= volver %>">
+        <div class="form-field">
+          <label for="prog-parcela">Parcela</label>
+          <select name="parcela_id" id="prog-parcela" required>
+            <option value="" disabled selected>Selecciona una parcela</option>
+            <% fincas.forEach(f => { %>
+              <optgroup label="<%= f.nombre %>">
+                <% parcelas.filter(p => p.finca_id === f.id).forEach(p => { %>
+                  <option value="<%= p.id %>"><%= p.nombre %></option>
+                <% }) %>
+              </optgroup>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="prog-nombre">Nombre</label>
+          <input type="text" name="nombre" id="prog-nombre" maxlength="100" placeholder="Ej. Riego de la mañana" required>
+        </div>
+        <div class="form-field">
+          <span class="field-group-label" id="prog-dias-label">Días de la semana</span>
+          <div class="dias-picker" role="group" aria-labelledby="prog-dias-label">
+            <% LETRAS.forEach(([letra, texto]) => { %>
+              <label class="dia-toggle" title="<%= texto %>">
+                <input type="checkbox" name="dias_semana" value="<%= letra %>">
+                <span><%= texto %></span>
+              </label>
+            <% }) %>
+          </div>
+          <div class="dias-atajos">
+            <button type="button" class="link-atajo" onclick="marcarDias('L,M,X,J,V,S,D')">Todos</button>
+            <button type="button" class="link-atajo" onclick="marcarDias('L,M,X,J,V')">Lunes a viernes</button>
+            <button type="button" class="link-atajo" onclick="marcarDias('S,D')">Fin de semana</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="prog-hora">Hora de inicio</label>
+            <input type="time" name="hora_inicio" id="prog-hora" required>
+          </div>
+          <div class="form-field">
+            <label for="prog-duracion">Duración (minutos)</label>
+            <input type="number" name="duracion_minutos" id="prog-duracion" min="1" max="720" placeholder="Ej. 30" required>
+          </div>
+        </div>
+        <p class="form-field-hint">
+          La hora y la duración siguen el reloj <%= reloj && reloj.modo === 'simulado' ? 'de la simulación (x' + reloj.escala + '): un riego de 30 min dura unos ' + Math.round(30 * 60 / reloj.escala) + ' segundos reales' : 'del motor de riego' %>.
+          Si a esa hora la parcela ya está regando, esa ejecución se omite.
+        </p>
+        <label class="checklist-item">
+          <input type="checkbox" name="activa" value="1" id="prog-activa" checked>
+          Activa (si la desmarcas, queda guardada pero pausada)
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('modal-programacion').classList.remove('open')">Cancelar</button>
+          <button type="submit" class="btn-primary" id="prog-guardar">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('.row-actions.open').forEach((el) => {
+        if (!el.contains(e.target)) el.classList.remove('open');
+      });
+    });
+
+    const modal = document.getElementById('modal-programacion');
+    const form = document.getElementById('form-programacion');
+
+    function marcarDias(lista) {
+      const dias = lista.split(',');
+      form.querySelectorAll('input[name="dias_semana"]').forEach((c) => (c.checked = dias.includes(c.value)));
+    }
+
+    function llenarProgramacion(datos, id) {
+      form.action = id ? '/riego/programaciones/' + id + '/editar' : '/riego/programaciones';
+      document.getElementById('programacion-titulo').innerHTML = id
+        ? '<i class="bi bi-pencil-fill"></i> Editar programación'
+        : '<i class="bi bi-calendar-plus"></i> Nueva programación';
+      document.getElementById('prog-guardar').textContent = id ? 'Guardar cambios' : 'Guardar';
+      document.getElementById('prog-parcela').value = datos.parcela_id || '';
+      document.getElementById('prog-nombre').value = datos.nombre || '';
+      document.getElementById('prog-hora').value = datos.hora_inicio || '06:00';
+      document.getElementById('prog-duracion').value = datos.duracion_minutos || 30;
+      document.getElementById('prog-activa').checked = datos.activa === undefined || datos.activa === true || datos.activa === '1';
+      const dias = Array.isArray(datos.dias_semana) ? datos.dias_semana.join(',') : (datos.dias_semana || 'L,M,X,J,V,S,D');
+      marcarDias(dias);
+      modal.classList.add('open');
+      document.getElementById('prog-nombre').focus();
+    }
+
+    function abrirNuevaProgramacion() {
+      llenarProgramacion({}, null);
+    }
+
+    function abrirEditarProgramacion(btn) {
+      const g = JSON.parse(btn.dataset.programacion);
+      llenarProgramacion(g, g.id);
+    }
+
+    <% if (formulario) { %>
+      llenarProgramacion(<%- JSON.stringify(formulario).replace(/</g, '\\u003c') %>, <%- formulario.id ? JSON.stringify(String(formulario.id)) : 'null' %>);
+    <% } %>
+
+    // Refresca el estado, el reloj y la bitácora cada 10 s sin recargar la
+    // página (si no hay un formulario abierto ni un campo en edición).
+    setInterval(async () => {
+      if (modal.classList.contains('open') || document.activeElement.matches('input, select, textarea')) return;
+      try {
+        const res = await fetch(location.href, { headers: { Accept: 'text/html' } });
+        if (res.redirected) return location.reload();
+        const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+        ['riego-estado', 'riego-bitacora', 'riego-reloj'].forEach((id) => {
+          const nuevo = doc.getElementById(id);
+          if (nuevo) document.getElementById(id).innerHTML = nuevo.innerHTML;
+        });
+      } catch (err) {
+        // sin conexión: se reintenta en la próxima vuelta
+      }
+    }, 10000);
+  </script>
+</body>
+</html>

@@ -113,6 +113,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       value: '${resumen.cultivosActivos}',
                       label: 'Cultivos activos',
                     ),
+                    _StatCard(
+                      icon: Icons.water,
+                      color: const Color(0xFF1565C0),
+                      value: '${resumen.riegosEnCurso}',
+                      label: 'Riegos en curso',
+                    ),
                   ],
                 ),
                 const SizedBox(height: 20),

@@ -39,6 +39,7 @@ class Parcela {
   final double? temperaturaActual;
   final String? estado;
   final DateTime? creadoEn;
+  final bool riegoAutomatico;
 
   /// Solo viene informado en el listado de "mis parcelas" del agrónomo
   /// (GET /api/usuarios/:id/parcelas), que junta varias fincas a la vez.
@@ -56,6 +57,7 @@ class Parcela {
     this.estado,
     this.creadoEn,
     this.fincaNombre,
+    this.riegoAutomatico = false,
   });
 
   factory Parcela.fromJson(Map<String, dynamic> json) {
@@ -77,6 +79,7 @@ class Parcela {
       estado: json['estado'] as String?,
       creadoEn: json['creado_en'] != null ? DateTime.tryParse(json['creado_en']) : null,
       fincaNombre: json['finca_nombre'] as String?,
+      riegoAutomatico: json['riego_automatico'] == true || json['riego_automatico'] == 1,
     );
   }
 }
@@ -353,12 +356,16 @@ class DashboardResumen {
   /// Cultivos no cosechados (para el agrónomo, solo los de sus parcelas).
   final int cultivosActivos;
 
+  /// Riegos en curso (para el agrónomo, solo los de sus parcelas).
+  final int riegosEnCurso;
+
   DashboardResumen({
     required this.estacionesActivas,
     required this.alertasHoy,
     this.humedadPromedio,
     this.temperaturaPromedio,
     this.cultivosActivos = 0,
+    this.riegosEnCurso = 0,
   });
 
   factory DashboardResumen.fromJson(Map<String, dynamic> json) {
@@ -374,6 +381,7 @@ class DashboardResumen {
       humedadPromedio: parseNum(json['humedad_promedio']),
       temperaturaPromedio: parseNum(json['temperatura_promedio']),
       cultivosActivos: (json['cultivos_activos'] as num?)?.toInt() ?? 0,
+      riegosEnCurso: (json['riegos_en_curso'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -435,6 +443,122 @@ class Cultivo {
       unidad: json['unidad'] as String? ?? 'plantas',
       estado: json['estado'] as String? ?? 'sembrado',
       notas: json['notas'] as String?,
+    );
+  }
+}
+
+/// Las horas de riego vienen "de pared" en el reloj del motor de riego
+/// (el simulado durante la demo), como texto "YYYY-MM-DD HH:MM[:SS]".
+DateTime? _fechaRiego(dynamic v) => v == null ? null : DateTime.tryParse(v.toString());
+
+/// Un riego de la bitácora (en curso, completado o detenido).
+class RiegoEvento {
+  static const origenes = {'programado': 'Programado', 'manual': 'Manual', 'automatico': 'Automático'};
+  static const estados = {'en_curso': 'En curso', 'completado': 'Completado', 'cancelado': 'Detenido'};
+
+  final int id;
+  final int parcelaId;
+  final String origen;
+  final String? programacionNombre;
+  final DateTime inicio;
+  final DateTime? fin;
+  final DateTime? finPrevisto;
+  final int duracionMinutos;
+  final String estado;
+
+  RiegoEvento({
+    required this.id,
+    required this.parcelaId,
+    required this.origen,
+    this.programacionNombre,
+    required this.inicio,
+    this.fin,
+    this.finPrevisto,
+    required this.duracionMinutos,
+    required this.estado,
+  });
+
+  String get origenTexto => origenes[origen] ?? origen;
+  String get estadoTexto => estados[estado] ?? estado;
+
+  factory RiegoEvento.fromJson(Map<String, dynamic> json) {
+    return RiegoEvento(
+      id: json['id'] as int,
+      parcelaId: json['parcela_id'] as int,
+      origen: json['origen'] as String,
+      programacionNombre: json['programacion_nombre'] as String?,
+      inicio: _fechaRiego(json['inicio']) ?? DateTime.now(),
+      fin: _fechaRiego(json['fin']),
+      finPrevisto: _fechaRiego(json['fin_previsto']),
+      duracionMinutos: (json['duracion_minutos'] as num).toInt(),
+      estado: json['estado'] as String,
+    );
+  }
+}
+
+class RiegoProgramacion {
+  final int id;
+  final String nombre;
+  final List<String> dias;
+  final String horaInicio;
+  final int duracionMinutos;
+  final bool activa;
+  final DateTime? proximaEjecucion;
+
+  RiegoProgramacion({
+    required this.id,
+    required this.nombre,
+    required this.dias,
+    required this.horaInicio,
+    required this.duracionMinutos,
+    required this.activa,
+    this.proximaEjecucion,
+  });
+
+  factory RiegoProgramacion.fromJson(Map<String, dynamic> json) {
+    return RiegoProgramacion(
+      id: json['id'] as int,
+      nombre: json['nombre'] as String,
+      dias: (json['dias_semana'] as String).split(','),
+      horaInicio: json['hora_inicio'] as String,
+      duracionMinutos: (json['duracion_minutos'] as num).toInt(),
+      activa: json['activa'] == true || json['activa'] == 1,
+      proximaEjecucion: _fechaRiego(json['proxima_ejecucion']),
+    );
+  }
+}
+
+/// Todo lo de riego de una parcela (GET /api/parcelas/:id/riego).
+class RiegoResumen {
+  final bool riegoAutomatico;
+  final RiegoEvento? riegoEnCurso;
+  final List<RiegoProgramacion> programaciones;
+  final List<RiegoEvento> ultimosRiegos;
+
+  /// Hora actual del motor de riego (null si el reloj del simulador no responde).
+  final DateTime? reloj;
+
+  RiegoResumen({
+    required this.riegoAutomatico,
+    this.riegoEnCurso,
+    required this.programaciones,
+    required this.ultimosRiegos,
+    this.reloj,
+  });
+
+  factory RiegoResumen.fromJson(Map<String, dynamic> json) {
+    return RiegoResumen(
+      riegoAutomatico: json['riego_automatico'] == true,
+      riegoEnCurso: json['riego_en_curso'] != null
+          ? RiegoEvento.fromJson(json['riego_en_curso'] as Map<String, dynamic>)
+          : null,
+      programaciones: (json['programaciones'] as List<dynamic>)
+          .map((e) => RiegoProgramacion.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      ultimosRiegos: (json['ultimos_riegos'] as List<dynamic>)
+          .map((e) => RiegoEvento.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      reloj: _fechaRiego(json['reloj']),
     );
   }
 }

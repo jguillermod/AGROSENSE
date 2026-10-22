@@ -3,6 +3,8 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const pool = require("./db");
+const { idPositivo, esAgronomo, puedeGestionarParcela } = require("./permisos");
+const riego = require("./riego");
 
 const TOKEN_TTL_MINUTOS = 30;
 const hash = (valor) => crypto.createHash("sha256").update(valor).digest("hex");
@@ -135,7 +137,7 @@ app.delete("/api/parcelas/:id", async (req, res) => {
 // Listado plano de todas las parcelas (para asignarlas a un usuario)
 app.get("/api/parcelas", async (req, res) => {
   const [rows] = await pool.query(
-    `SELECT p.id, p.nombre, p.finca_id, f.nombre AS finca_nombre
+    `SELECT p.id, p.nombre, p.finca_id, f.nombre AS finca_nombre, p.riego_automatico
      FROM parcelas p
      JOIN fincas f ON f.id = p.finca_id
      ORDER BY f.nombre, p.nombre`
@@ -374,10 +376,7 @@ app.get("/api/estaciones", async (req, res) => {
 });
 
 // --- Inventario de cultivos ---
-// Permisos: igual que los registros manuales de lecturas-service, si la
-// petición trae usuario_id y ese usuario es agrónomo, solo ve y gestiona
-// cultivos de las parcelas que tiene asignadas en usuario_parcelas; admin y
-// agricultor mantienen el mismo acceso amplio que ya tienen sobre parcelas.
+// Permisos: ver permisos.js (el agrónomo solo opera sus parcelas asignadas).
 
 const UNIDADES_CULTIVO = ["plantas", "kg", "quintales"];
 const ESTADOS_CULTIVO = ["sembrado", "en_crecimiento", "cosechado"];
@@ -394,11 +393,6 @@ const SELECT_CULTIVOS = `
   FROM cultivos c
   JOIN parcelas p ON p.id = c.parcela_id
   JOIN fincas f ON f.id = p.finca_id`;
-
-const idPositivo = (valor) => {
-  const n = Number(valor);
-  return Number.isInteger(n) && n > 0 ? n : null;
-};
 
 function fechaValida(valor) {
   if (typeof valor !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
@@ -439,24 +433,6 @@ function validarCultivo(body) {
   if (!UNIDADES_CULTIVO.includes(datos.unidad)) return { error: `Unidad inválida (usa: ${UNIDADES_CULTIVO.join(", ")})` };
   if (!ESTADOS_CULTIVO.includes(datos.estado)) return { error: `Estado inválido (usa: ${ESTADOS_CULTIVO.join(", ")})` };
   return { datos };
-}
-
-async function esAgronomo(usuarioId) {
-  if (!usuarioId) return false;
-  const [rows] = await pool.query("SELECT rol FROM usuarios WHERE id = ?", [usuarioId]);
-  return rows.length > 0 && rows[0].rol === "agronomo";
-}
-
-async function puedeGestionarParcela(usuarioId, parcelaId) {
-  if (!usuarioId) return true;
-  const [usuarios] = await pool.query("SELECT rol FROM usuarios WHERE id = ?", [usuarioId]);
-  if (usuarios.length === 0) return false;
-  if (usuarios[0].rol !== "agronomo") return true;
-  const [asignaciones] = await pool.query(
-    "SELECT 1 FROM usuario_parcelas WHERE usuario_id = ? AND parcela_id = ?",
-    [usuarioId, parcelaId]
-  );
-  return asignaciones.length > 0;
 }
 
 // Listado con filtros opcionales: finca_id, parcela_id, estado, usuario_id
@@ -578,9 +554,12 @@ app.delete("/api/cultivos/:id", async (req, res) => {
   }
 });
 
+// --- Riego: programaciones, riego manual/automático, bitácora y motor ---
+riego.registrarRutas(app);
+
 // --- Dashboard: resumen general ---
-// cultivos_activos = cultivos no cosechados; si llega usuario_id de un
-// agrónomo, solo cuenta los de sus parcelas asignadas.
+// cultivos_activos = cultivos no cosechados y riegos_en_curso; si llega
+// usuario_id de un agrónomo, ambos se limitan a sus parcelas asignadas.
 app.get("/api/dashboard/resumen", async (req, res) => {
   const usuarioId = idPositivo(req.query.usuario_id);
   const soloAsignadas = await esAgronomo(usuarioId);
@@ -595,8 +574,14 @@ app.get("/api/dashboard/resumen", async (req, res) => {
            ? `(SELECT COUNT(*) FROM cultivos c JOIN usuario_parcelas up ON up.parcela_id = c.parcela_id
                WHERE up.usuario_id = ? AND c.estado <> 'cosechado')`
            : `(SELECT COUNT(*) FROM cultivos WHERE estado <> 'cosechado')`
-       } AS cultivos_activos`,
-    soloAsignadas ? [usuarioId] : []
+       } AS cultivos_activos,
+       ${
+         soloAsignadas
+           ? `(SELECT COUNT(*) FROM riego_eventos r JOIN usuario_parcelas up ON up.parcela_id = r.parcela_id
+               WHERE up.usuario_id = ? AND r.estado = 'en_curso')`
+           : `(SELECT COUNT(*) FROM riego_eventos WHERE estado = 'en_curso')`
+       } AS riegos_en_curso`,
+    soloAsignadas ? [usuarioId, usuarioId] : []
   );
   res.json(resumen);
 });
@@ -620,4 +605,5 @@ app.get("/api/dashboard/humedad-historial", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`fincas-service escuchando en puerto ${PORT}`);
+  riego.iniciarMotor();
 });

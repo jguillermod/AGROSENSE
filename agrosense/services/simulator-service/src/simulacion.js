@@ -5,7 +5,10 @@
 // Modelo (en horas simuladas; SIM_TIME_SCALE convierte tiempo real a
 // simulado, p. ej. 144 = un día simulado cada 10 minutos reales):
 // - Humedad de suelo: random walk que baja por evaporación (más rápido con
-//   calor) y sube con riegos automáticos cuando se acerca al mínimo.
+//   calor). Sube mientras la parcela tiene un riego en curso en el motor de
+//   riego de fincas-service (programado, manual o automático). Si la parcela
+//   no tiene riego automático, en "normal"/"ola_calor" además se simula un
+//   riego implícito (lluvia/riego no registrado) que la mantiene en rango.
 // - Temperatura: ciclo día/noche senoidal (máxima ~15:00, mínima ~03:00)
 //   más ruido pequeño.
 // - Humedad ambiental: inversa a la temperatura.
@@ -14,8 +17,10 @@
 // alertas que se disparan son las reales del lecturas-service.
 
 const { prepararDatosDemo, leerUmbrales } = require("./seed");
+const { RelojSimulado } = require("./reloj");
 
 const LECTURAS_URL = process.env.LECTURAS_SERVICE_URL || "http://lecturas-service:3000";
+const FINCAS_URL = process.env.FINCAS_SERVICE_URL || "http://fincas-service:3000";
 const ESCENARIOS = ["normal", "sequia", "ola_calor", "exceso_lluvia"];
 const TICKS_ENTRE_REFRESCOS = 6;
 
@@ -34,7 +39,9 @@ class Simulador {
     this.escenario = ESCENARIOS.includes(escenario) ? escenario : "normal";
     this.pausado = pausado;
     this.estado = "inicializando";
-    this.horasSimuladas = 6; // arranca el día 1 a las 06:00
+    this.reloj = new RelojSimulado();
+    this.ultimoTickReal = Date.now();
+    this.regando = new Set(); // ids de parcelas con un riego en curso
     this.finca = null;
     this.parcelas = [];
     this.ticks = 0;
@@ -48,6 +55,7 @@ class Simulador {
   }
 
   async iniciar() {
+    await this.reloj.cargar();
     for (;;) {
       try {
         await this.sincronizar();
@@ -77,6 +85,7 @@ class Simulador {
       const estadosPrevios = new Map((previa?.estaciones || []).map((e) => [e.id, e]));
       return {
         ...p,
+        riego_automatico: Boolean(p.riego_automatico),
         desfaseTemp: previa?.desfaseTemp ?? 0,
         desfaseHr: previa?.desfaseHr ?? 0,
         estaciones: p.estaciones.map((e) => {
@@ -120,8 +129,10 @@ class Simulador {
     }
 
     const dtH = (this.intervalo * this.escala) / 3600;
-    this.horasSimuladas += dtH;
-    const hora = this.horasSimuladas % 24;
+    await this.reloj.avanzar(dtH);
+    this.ultimoTickReal = Date.now();
+    const hora = RelojSimulado.horaDelDia(this.reloj.ms);
+    await this.leerRiegosActivos();
 
     const envios = [];
     for (const p of this.parcelas) {
@@ -131,6 +142,36 @@ class Simulador {
       }
     }
     await Promise.allSettled(envios);
+  }
+
+  // Parcelas que el motor de riego (fincas-service) está regando ahora
+  async leerRiegosActivos() {
+    try {
+      const res = await fetch(`${FINCAS_URL}/api/riego/activos`, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) throw new Error(`fincas-service respondió ${res.status}`);
+      this.regando = new Set((await res.json()).map((r) => r.parcela_id));
+    } catch (err) {
+      this.regando = new Set();
+      this.registrarError(`No se pudieron leer los riegos en curso: ${err.message}`);
+    }
+  }
+
+  // Hora simulada actual. Entre vueltas se interpola con el tiempo real
+  // transcurrido (sin pasar de un intervalo), para que el motor de riego vea
+  // avanzar el reloj de forma continua y no a saltos de 24 minutos.
+  horaActualMs() {
+    if (this.estado !== "listo" || this.pausado) return this.reloj.ms;
+    const transcurrido = Math.min(Date.now() - this.ultimoTickReal, this.intervalo * 1000);
+    return this.reloj.ms + transcurrido * this.escala;
+  }
+
+  relojPublico() {
+    return {
+      modo: "simulado",
+      ...this.reloj.describir(this.horaActualMs()),
+      escala: this.escala,
+      pausado: this.pausado || this.estado !== "listo",
+    };
   }
 
   // Relee umbrales (por si se editaron en el panel). Si faltan los datos
@@ -152,6 +193,7 @@ class Simulador {
         p.humedad_min = Number(a.humedad_min);
         p.humedad_max = Number(a.humedad_max);
         p.temperatura_max = Number(a.temperatura_max);
+        p.riego_automatico = Boolean(a.riego_automatico);
       }
     } catch (err) {
       this.registrarError(`No se pudieron refrescar los datos demo: ${err.message}`);
@@ -184,7 +226,13 @@ class Simulador {
     const ciclo = Math.sin((2 * Math.PI * (hora - 9)) / 24); // pico a las 15:00
     const temperatura = this.tempMedia(p) + p.desfaseTemp + amplitud * ciclo + e.sesgoTemp + ruido(0.3);
 
-    if (this.escenario === "sequia") {
+    if (this.regando.has(p.id)) {
+      // riego en curso: el agua sube la humedad poco a poco hasta un tope
+      // realista (capacidad de campo, algo por debajo del máximo de la parcela)
+      const tope = Math.min(95, p.humedad_max - 3);
+      if (e.suelo < tope) e.suelo += (tope - e.suelo) * acercar(dtH, 0.9);
+      e.riegoPendiente = 0;
+    } else if (this.escenario === "sequia") {
       // sin riego y con evaporación fuerte: tiende muy por debajo del mínimo
       const objetivo = Math.max(5, p.humedad_min - 12);
       e.suelo += (objetivo - e.suelo) * acercar(dtH, 0.25);
@@ -195,13 +243,16 @@ class Simulador {
       e.suelo += (objetivo - e.suelo) * acercar(dtH, 0.3);
       e.riegoPendiente = 0;
     } else {
-      // normal / ola_calor: evaporación según temperatura + riego automático
+      // normal / ola_calor: evaporación según temperatura
       const factorCalor = clamp(1 + (temperatura - 22) / 12, 0.3, 2.5);
       e.suelo -= 0.5 * factorCalor * dtH;
       if (e.suelo > p.humedad_max - 2) {
         e.suelo -= (e.suelo - (p.humedad_max - 5)) * acercar(dtH, 0.2); // drenaje
       }
-      if (e.suelo < p.humedad_min + 4 && e.riegoPendiente <= 0) {
+      // riego implícito solo sin riego automático: con él activo es el motor
+      // de riego quien decide cuándo regar
+      if (p.riego_automatico) e.riegoPendiente = 0;
+      else if (e.suelo < p.humedad_min + 4 && e.riegoPendiente <= 0) {
         e.riegoPendiente = (p.humedad_max - p.humedad_min) * 0.45;
       }
       if (e.riegoPendiente > 0) {
@@ -267,6 +318,7 @@ class Simulador {
 
   reanudar() {
     this.pausado = false;
+    this.ultimoTickReal = Date.now();
   }
 
   setIntervalo(segundos) {
@@ -280,9 +332,7 @@ class Simulador {
   }
 
   status() {
-    const dia = Math.floor(this.horasSimuladas / 24) + 1;
-    const minutos = Math.floor((this.horasSimuladas % 24) * 60);
-    const hora = `${String(Math.floor(minutos / 60)).padStart(2, "0")}:${String(minutos % 60).padStart(2, "0")}`;
+    const { dia, hora, fecha_hora, dia_semana } = this.reloj.describir(this.horaActualMs());
     return {
       estado: this.estado === "listo" ? (this.pausado ? "pausado" : "corriendo") : this.estado,
       escenario: this.escenario,
@@ -290,7 +340,7 @@ class Simulador {
       intervalo_segundos: this.intervalo,
       escala_tiempo: this.escala,
       minutos_reales_por_dia_simulado: redondear((24 * 60) / this.escala),
-      reloj_simulado: { dia, hora },
+      reloj_simulado: { dia, hora, fecha_hora, dia_semana },
       ticks: this.ticks,
       lecturas_enviadas: this.lecturasEnviadas,
       alertas_disparadas: this.alertasDisparadas,
@@ -301,6 +351,8 @@ class Simulador {
         id: p.id,
         nombre: p.nombre,
         umbrales: { humedad_min: p.humedad_min, humedad_max: p.humedad_max, temperatura_max: p.temperatura_max },
+        regando: this.regando.has(p.id),
+        riego_automatico: Boolean(p.riego_automatico),
         estaciones: p.estaciones.map((e) => ({
           id: e.id,
           codigo: e.codigo,
