@@ -39,6 +39,8 @@ services:
   fincas-service-test:
     build: ./services/fincas-service
     env_file: .env.test
+    environment:
+      SIMULATOR_SERVICE_URL: http://simulator-service-test:3000
     ports:
       - "4002:3000"
     depends_on:
