@@ -54,6 +54,24 @@ services:
       mysql-test:
         condition: service_healthy
 
+  simulator-service-test:
+    build: ./services/simulator-service
+    env_file: .env.test
+    environment:
+      FINCAS_SERVICE_URL: http://fincas-service-test:3000
+      LECTURAS_SERVICE_URL: http://lecturas-service-test:3000
+    ports:
+      - "4004:3000"
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+      fincas-service-test:
+        condition: service_started
+      lecturas-service-test:
+        condition: service_started
+    volumes:
+      - simulator_test_data:/data
+
   web-admin-test:
     build: ./web-admin
     env_file: .env.test
@@ -66,3 +84,4 @@ services:
 
 volumes:
   mysql_test_data:
+  simulator_test_data:

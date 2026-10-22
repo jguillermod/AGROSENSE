@@ -91,6 +91,26 @@ services:
     volumes:
       - ./services/etl-service:/app
 
+  # Simula los sensores (ESP32): crea datos demo y envía lecturas periódicas
+  simulator-service:
+    build: ./services/simulator-service
+    container_name: agrosense-simulator
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3004:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      fincas-service:
+        condition: service_started
+      lecturas-service:
+        condition: service_started
+    volumes:
+      - ./services/simulator-service:/app
+      - /app/node_modules
+      - simulator_data:/data
+
   web-admin:
     build: ./web-admin
     container_name: agrosense-web
@@ -108,3 +128,4 @@ services:
 
 volumes:
   mysql_data:
+  simulator_data:
