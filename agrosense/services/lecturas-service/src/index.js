@@ -3,6 +3,8 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const pool = require("./db");
+const alertas = require("./alertas");
+const clima = require("./clima");
 
 const app = express();
 app.use(cors());
@@ -41,41 +43,12 @@ app.post("/api/lecturas", async (req, res) => {
       [estacion_id, humedad_suelo, temperatura, humedad_ambiental]
     );
 
-    // Traer umbrales de la parcela asociada a esta estación (RF-09)
-    const [parcelaRows] = await pool.query(
-      `SELECT p.id AS parcela_id, p.humedad_min, p.humedad_max, p.temperatura_max
-       FROM parcelas p
-       JOIN estaciones e ON e.parcela_id = p.id
-       WHERE e.id = ?`,
-      [estacion_id]
-    );
+    // Alertas de sensor de la parcela (RF-09): una vigente por tipo, que se
+    // actualiza mientras siga fuera de rango y se resuelve al volver (alertas.js)
+    const { nuevas, vigentes } = await alertas.evaluarLectura(estacion_id);
+    const alerta = nuevas[0] || null;
 
-    let alerta = null;
-    if (parcelaRows.length > 0) {
-      const p = parcelaRows[0];
-      if (humedad_suelo < p.humedad_min) alerta = "Necesita riego";
-      else if (humedad_suelo > p.humedad_max) alerta = "Riesgo de exceso de humedad";
-      else if (temperatura > p.temperatura_max) alerta = "Riesgo de estrés hídrico por calor";
-
-      // Si la parcela ya se está regando, "Necesita riego" no aporta nada:
-      // la humedad tarda unas lecturas en recuperarse y solo llenaría de ruido.
-      if (alerta === "Necesita riego") {
-        const [regando] = await pool.query(
-          "SELECT 1 FROM riego_eventos WHERE parcela_id = ? AND estado = 'en_curso' LIMIT 1",
-          [p.parcela_id]
-        );
-        if (regando.length > 0) alerta = null;
-      }
-
-      if (alerta) {
-        await pool.query(
-          `INSERT INTO alertas (parcela_id, estacion_id, tipo, fecha) VALUES (?, ?, ?, NOW())`,
-          [p.parcela_id, estacion_id, alerta]
-        );
-      }
-    }
-
-    res.status(201).json({ id: result.insertId, alerta });
+    res.status(201).json({ id: result.insertId, alerta, alertas_vigentes: vigentes });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al guardar la lectura" });
@@ -131,25 +104,41 @@ app.get("/api/lecturas/recientes", async (req, res) => {
   }
 });
 
-app.get("/api/alertas/recientes", async (req, res) => {
+// Exportación (CSV desde el panel): filtros parcela_id / finca_id y rango
+// desde / hasta (YYYY-MM-DD, inclusive). Hasta EXPORT_MAX filas, de la más
+// vieja a la más nueva; si se alcanza el límite la respuesta lo indica en la
+// cabecera X-Export-Truncado para que el panel lo avise.
+const EXPORT_MAX = 100000;
+app.get("/api/lecturas/exportar", async (req, res) => {
   try {
     const { where, params } = filtroUbicacion(req.query);
+    const condiciones = where ? [where.replace(/^WHERE /, "")] : [];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(req.query.desde || "")) {
+      condiciones.push("l.fecha >= ?");
+      params.push(`${req.query.desde} 00:00:00`);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(req.query.hasta || "")) {
+      condiciones.push("l.fecha < ? + INTERVAL 1 DAY");
+      params.push(`${req.query.hasta} 00:00:00`);
+    }
+    const limiteFilas = limite(req.query.limit, 50000, EXPORT_MAX);
     const [rows] = await pool.query(
-      `SELECT a.id, a.tipo, a.fecha, a.estacion_id, e.codigo AS estacion_codigo,
-              p.id AS parcela_id, p.nombre AS parcela_nombre, f.nombre AS finca_nombre
-       FROM alertas a
-       JOIN estaciones e ON e.id = a.estacion_id
-       JOIN parcelas p ON p.id = a.parcela_id
+      `SELECT l.id, l.fecha, f.nombre AS finca_nombre, p.nombre AS parcela_nombre, e.codigo AS estacion_codigo,
+              l.humedad_suelo, l.temperatura, l.humedad_ambiental
+       FROM lecturas l
+       JOIN estaciones e ON e.id = l.estacion_id
+       JOIN parcelas p ON p.id = e.parcela_id
        JOIN fincas f ON f.id = p.finca_id
-       ${where}
-       ORDER BY a.id DESC
+       ${condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : ""}
+       ORDER BY l.id
        LIMIT ?`,
-      [...params, limite(req.query.limit, 20, 200)]
+      [...params, limiteFilas]
     );
+    if (rows.length === limiteFilas) res.set("X-Export-Truncado", String(limiteFilas));
     res.json(rows);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error al consultar las alertas recientes" });
+    res.status(500).json({ error: "Error al exportar las lecturas" });
   }
 });
 
@@ -158,15 +147,6 @@ app.get("/api/estaciones/:estacionId/lecturas", async (req, res) => {
   const [rows] = await pool.query(
     "SELECT * FROM lecturas WHERE estacion_id = ? ORDER BY fecha DESC LIMIT 200",
     [req.params.estacionId]
-  );
-  res.json(rows);
-});
-
-// Alertas activas de una parcela
-app.get("/api/parcelas/:parcelaId/alertas", async (req, res) => {
-  const [rows] = await pool.query(
-    "SELECT * FROM alertas WHERE parcela_id = ? ORDER BY fecha DESC",
-    [req.params.parcelaId]
   );
   res.json(rows);
 });
@@ -239,7 +219,12 @@ app.post("/api/parcelas/:parcelaId/registros", async (req, res) => {
   }
 });
 
+// --- Alertas (sensor y climáticas) y clima ---
+alertas.registrarRutas(app);
+clima.registrarRutas(app);
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`lecturas-service escuchando en puerto ${PORT}`);
+  clima.iniciar();
 });

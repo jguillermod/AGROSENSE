@@ -12,12 +12,17 @@
 // - Temperatura: ciclo día/noche senoidal (máxima ~15:00, mínima ~03:00)
 //   más ruido pequeño.
 // - Humedad ambiental: inversa a la temperatura.
+// - Clima (clima.js): los eventos de lluvia, helada, ola de calor y viento se
+//   suman al escenario: la lluvia sube la humedad de suelo y ambiental y baja
+//   la temperatura; la helada la lleva bajo la mínima de cada parcela; la ola
+//   de calor la sube sobre la máxima; el viento seca el aire y el suelo.
 // Los escenarios no cambian los valores de golpe: mueven gradualmente
 // objetivos/desfases hasta cruzar los umbrales de cada parcela, así las
 // alertas que se disparan son las reales del lecturas-service.
 
 const { prepararDatosDemo, leerUmbrales } = require("./seed");
 const { RelojSimulado } = require("./reloj");
+const { ClimaSimulado } = require("./clima");
 
 const LECTURAS_URL = process.env.LECTURAS_SERVICE_URL || "http://lecturas-service:3000";
 const FINCAS_URL = process.env.FINCAS_SERVICE_URL || "http://fincas-service:3000";
@@ -40,6 +45,7 @@ class Simulador {
     this.pausado = pausado;
     this.estado = "inicializando";
     this.reloj = new RelojSimulado();
+    this.clima = new ClimaSimulado();
     this.ultimoTickReal = Date.now();
     this.regando = new Set(); // ids de parcelas con un riego en curso
     this.finca = null;
@@ -86,6 +92,7 @@ class Simulador {
       return {
         ...p,
         riego_automatico: Boolean(p.riego_automatico),
+        temperatura_min: p.temperatura_min,
         desfaseTemp: previa?.desfaseTemp ?? 0,
         desfaseHr: previa?.desfaseHr ?? 0,
         estaciones: p.estaciones.map((e) => {
@@ -129,16 +136,19 @@ class Simulador {
     }
 
     const dtH = (this.intervalo * this.escala) / 3600;
+    const antes = this.reloj.ms;
     await this.reloj.avanzar(dtH);
     this.ultimoTickReal = Date.now();
+    this.clima.avanzar(antes, this.reloj.ms);
     const hora = RelojSimulado.horaDelDia(this.reloj.ms);
+    const evento = this.clima.activo(this.reloj.ms);
     await this.leerRiegosActivos();
 
     const envios = [];
     for (const p of this.parcelas) {
-      this.avanzarParcela(p, dtH);
+      this.avanzarParcela(p, dtH, hora, evento);
       for (const e of p.estaciones) {
-        envios.push(this.enviar(e, this.generarLectura(p, e, dtH, hora)));
+        envios.push(this.enviar(e, this.generarLectura(p, e, dtH, hora, evento)));
       }
     }
     await Promise.allSettled(envios);
@@ -163,6 +173,10 @@ class Simulador {
     if (this.estado !== "listo" || this.pausado) return this.reloj.ms;
     const transcurrido = Math.min(Date.now() - this.ultimoTickReal, this.intervalo * 1000);
     return this.reloj.ms + transcurrido * this.escala;
+  }
+
+  climaPublico() {
+    return this.clima.snapshot(this.horaActualMs(), this.finca);
   }
 
   relojPublico() {
@@ -194,6 +208,7 @@ class Simulador {
         p.humedad_max = Number(a.humedad_max);
         p.temperatura_max = Number(a.temperatura_max);
         p.riego_automatico = Boolean(a.riego_automatico);
+        p.temperatura_min = a.temperatura_min === null ? null : Number(a.temperatura_min);
       }
     } catch (err) {
       this.registrarError(`No se pudieron refrescar los datos demo: ${err.message}`);
@@ -206,9 +221,13 @@ class Simulador {
     return Math.min(24, p.temperatura_max - 10);
   }
 
+  amplitud() {
+    return this.escenario === "exceso_lluvia" ? 3 : 6;
+  }
+
   // Mueve gradualmente los desfases de temperatura y humedad ambiental
-  // hacia lo que pide el escenario actual.
-  avanzarParcela(p, dtH) {
+  // hacia lo que piden el escenario actual y el evento de clima en curso.
+  avanzarParcela(p, dtH, hora, evento) {
     const objetivos = {
       normal: { temp: 0, hr: 0 },
       sequia: { temp: 3, hr: -12 },
@@ -217,20 +236,42 @@ class Simulador {
       ola_calor: { temp: p.temperatura_max + 3 - this.tempMedia(p), hr: -8 },
       exceso_lluvia: { temp: -3, hr: 25 },
     }[this.escenario];
-    p.desfaseTemp += (objetivos.temp - p.desfaseTemp) * acercar(dtH, 0.35);
-    p.desfaseHr += (objetivos.hr - p.desfaseHr) * acercar(dtH, 0.35);
+    let { temp, hr } = objetivos;
+    let k = 0.35;
+    // temperatura "normal" de esta hora, para fijar el objetivo de los eventos
+    const base = this.tempMedia(p) + this.amplitud() * Math.sin((2 * Math.PI * (hora - 9)) / 24);
+    if (evento?.tipo === "helada") {
+      const tMin = p.temperatura_min ?? 5;
+      temp = tMin - 3 - base;
+      k = 1.2;
+    } else if (evento?.tipo === "ola_calor") {
+      temp = p.temperatura_max + 4 - base;
+      hr -= 10;
+      k = 1;
+    } else if (evento?.tipo === "lluvia") {
+      temp -= 4;
+      hr += 20;
+      k = 1;
+    } else if (evento?.tipo === "viento") {
+      hr -= 10;
+      k = 1;
+    }
+    p.desfaseTemp += (temp - p.desfaseTemp) * acercar(dtH, k);
+    p.desfaseHr += (hr - p.desfaseHr) * acercar(dtH, k);
   }
 
-  generarLectura(p, e, dtH, hora) {
-    const amplitud = this.escenario === "exceso_lluvia" ? 3 : 6;
+  generarLectura(p, e, dtH, hora, evento) {
+    const amplitud = this.amplitud();
     const ciclo = Math.sin((2 * Math.PI * (hora - 9)) / 24); // pico a las 15:00
     const temperatura = this.tempMedia(p) + p.desfaseTemp + amplitud * ciclo + e.sesgoTemp + ruido(0.3);
 
-    if (this.regando.has(p.id)) {
+    const lluvia = evento?.tipo === "lluvia";
+    if (this.regando.has(p.id) || lluvia) {
       // riego en curso: el agua sube la humedad poco a poco hasta un tope
-      // realista (capacidad de campo, algo por debajo del máximo de la parcela)
-      const tope = Math.min(95, p.humedad_max - 3);
-      if (e.suelo < tope) e.suelo += (tope - e.suelo) * acercar(dtH, 0.9);
+      // realista (capacidad de campo, algo por debajo del máximo de la
+      // parcela). La lluvia sigue sumando y puede encharcar sobre el máximo.
+      const tope = lluvia ? Math.min(98, p.humedad_max + 5) : Math.min(95, p.humedad_max - 3);
+      if (e.suelo < tope) e.suelo += (tope - e.suelo) * acercar(dtH, lluvia ? 0.6 : 0.9);
       e.riegoPendiente = 0;
     } else if (this.escenario === "sequia") {
       // sin riego y con evaporación fuerte: tiende muy por debajo del mínimo
@@ -245,7 +286,8 @@ class Simulador {
     } else {
       // normal / ola_calor: evaporación según temperatura
       const factorCalor = clamp(1 + (temperatura - 22) / 12, 0.3, 2.5);
-      e.suelo -= 0.5 * factorCalor * dtH;
+      const factorViento = evento?.tipo === "viento" ? 1.6 : 1;
+      e.suelo -= 0.5 * factorCalor * factorViento * dtH;
       if (e.suelo > p.humedad_max - 2) {
         e.suelo -= (e.suelo - (p.humedad_max - 5)) * acercar(dtH, 0.2); // drenaje
       }
@@ -341,6 +383,10 @@ class Simulador {
       escala_tiempo: this.escala,
       minutos_reales_por_dia_simulado: redondear((24 * 60) / this.escala),
       reloj_simulado: { dia, hora, fecha_hora, dia_semana },
+      clima_evento: (() => {
+        const ev = this.clima.activo(this.horaActualMs());
+        return ev ? this.clima.describirEvento(ev, this.horaActualMs()) : null;
+      })(),
       ticks: this.ticks,
       lecturas_enviadas: this.lecturasEnviadas,
       alertas_disparadas: this.alertasDisparadas,

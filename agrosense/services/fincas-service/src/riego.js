@@ -14,7 +14,11 @@ const DIA_POR_INDICE = ["D", "L", "M", "X", "J", "V", "S"]; // índice = getUTCD
 const ORDEN_DIAS = ["L", "M", "X", "J", "V", "S", "D"];
 const DURACION_MAX = 720;
 const ORIGENES = ["programado", "manual", "automatico"];
-const ESTADOS = ["en_curso", "completado", "cancelado"];
+const ESTADOS = ["en_curso", "completado", "cancelado", "omitido"];
+
+// Alertas climáticas de lluvia (las crea lecturas-service, ver su clima.js):
+// con alguna vigente en la parcela, el motor no riega y lo anota en la bitácora.
+const ALERTAS_LLUVIA = ["Lluvia en curso: riego pospuesto", "Lluvia intensa prevista: posponer riego"];
 
 // Duración (en minutos del reloj del motor) de cada riego automático
 const AUTO_DURACION = Number(process.env.RIEGO_AUTO_DURACION_MINUTOS) || 60;
@@ -78,7 +82,7 @@ const SELECT_EVENTOS = `
          DATE_FORMAT(r.inicio, '%Y-%m-%d %H:%i:%s') AS inicio,
          DATE_FORMAT(r.fin, '%Y-%m-%d %H:%i:%s') AS fin,
          DATE_FORMAT(r.inicio + INTERVAL r.duracion_minutos MINUTE, '%Y-%m-%d %H:%i:%s') AS fin_previsto,
-         r.duracion_minutos, r.estado, r.creado_en
+         r.duracion_minutos, r.estado, r.motivo, r.creado_en
   FROM riego_eventos r
   JOIN parcelas p ON p.id = r.parcela_id
   JOIN fincas f ON f.id = p.finca_id
@@ -168,7 +172,7 @@ async function listarEventos({ parcelaId, fincaId, desde, hasta, estado, origen,
   const where = condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "";
   const [rows] = await pool.query(`${SELECT_EVENTOS} ${where} ORDER BY r.inicio DESC, r.id DESC LIMIT ?`, [
     ...params,
-    Math.min(500, Math.max(1, Number(limite) || 100)),
+    Math.min(5000, Math.max(1, Number(limite) || 100)),
   ]);
   return rows;
 }
@@ -209,6 +213,26 @@ async function abrirRiego({ parcelaId, origen, programacionId = null, inicio, du
   }
 }
 
+// Alerta de lluvia vigente en la parcela (o null)
+async function lluviaVigente(parcelaId) {
+  const [rows] = await pool.query(
+    `SELECT id, tipo, fecha FROM alertas
+     WHERE parcela_id = ? AND categoria = 'climatica' AND estado IN ('activa', 'atendida') AND tipo IN (?)
+     ORDER BY fecha LIMIT 1`,
+    [parcelaId, ALERTAS_LLUVIA]
+  );
+  return rows[0] || null;
+}
+
+// Deja en la bitácora un riego que no se hizo (estado "omitido", 0 minutos)
+async function registrarOmitido({ parcelaId, origen, programacionId = null, inicio, motivo }) {
+  await pool.query(
+    `INSERT INTO riego_eventos (parcela_id, programacion_id, origen, inicio, fin, duracion_minutos, estado, motivo)
+     VALUES (?, ?, ?, ?, ?, 0, 'omitido', ?)`,
+    [parcelaId, programacionId, origen, reloj.aSql(inicio), reloj.aSql(inicio), motivo]
+  );
+}
+
 // Cierra los riegos cuyo tiempo ya se cumplió
 async function cerrarVencidos(ahora) {
   const [result] = await pool.query(
@@ -235,6 +259,18 @@ async function ejecutarProgramaciones(desde, hasta) {
       const candidata = new Date(dia + (h * 60 + m) * 60000);
       if (candidata <= inicioVentana || candidata > hasta) continue;
       if (!dias.includes(DIA_POR_INDICE[candidata.getUTCDay()])) continue;
+      const lluvia = await lluviaVigente(prog.parcela_id);
+      if (lluvia) {
+        await registrarOmitido({
+          parcelaId: prog.parcela_id,
+          origen: "programado",
+          programacionId: prog.id,
+          inicio: candidata,
+          motivo: `Omitido por lluvia (${lluvia.tipo.split(":")[0].toLowerCase()}); estaba programado por ${prog.duracion_minutos} min`,
+        });
+        console.log(`[riego] "${prog.nombre}" (${reloj.aSql(candidata)}) omitido por lluvia`);
+        continue;
+      }
       const r = await abrirRiego({
         parcelaId: prog.parcela_id,
         origen: "programado",
@@ -268,6 +304,25 @@ async function ejecutarRiegoAutomatico(ahora) {
      HAVING AVG(l.humedad_suelo) < MAX(p.humedad_min)`
   );
   for (const p of parcelas) {
+    const lluvia = await lluviaVigente(p.id);
+    if (lluvia) {
+      // se anota una sola vez por episodio de lluvia, no en cada vuelta del motor
+      const [yaAnotado] = await pool.query(
+        `SELECT 1 FROM riego_eventos
+         WHERE parcela_id = ? AND origen = 'automatico' AND estado = 'omitido' AND creado_en >= ? LIMIT 1`,
+        [p.id, lluvia.fecha]
+      );
+      if (yaAnotado.length === 0) {
+        await registrarOmitido({
+          parcelaId: p.id,
+          origen: "automatico",
+          inicio: ahora,
+          motivo: `Omitido por lluvia (${lluvia.tipo.split(":")[0].toLowerCase()}); humedad ${Number(p.humedad).toFixed(1)}% bajo el mínimo`,
+        });
+        console.log(`[riego] Riego automático en ${p.nombre} omitido por lluvia`);
+      }
+      continue;
+    }
     const r = await abrirRiego({ parcelaId: p.id, origen: "automatico", inicio: ahora, duracion: AUTO_DURACION });
     if (!r.error) {
       console.log(

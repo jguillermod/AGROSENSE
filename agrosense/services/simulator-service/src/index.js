@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { Simulador, ESCENARIOS } = require("./simulacion");
+const { TIPOS_EVENTO } = require("./clima");
 
 const numeroEnv = (nombre, porDefecto) => {
   const valor = Number(process.env[nombre]);
@@ -32,6 +33,42 @@ app.get("/health", (req, res) => {
 
 app.get("/status", (req, res) => {
   res.json(simulador.status());
+});
+
+// Clima actual, pronóstico de 24 h simuladas y eventos programados
+app.get("/clima", (req, res) => {
+  res.json(simulador.climaPublico());
+});
+
+// Evento de clima a mano: {"tipo": "lluvia"|"helada"|"ola_calor"|"viento",
+// "duracion_horas": N, "en_horas": M (opcional, para que primero aparezca
+// en el pronóstico)}. Las horas son simuladas.
+app.post("/clima/evento", (req, res) => {
+  const { tipo } = req.body || {};
+  const duracion = Number((req.body || {}).duracion_horas);
+  const enHoras = Number((req.body || {}).en_horas || 0);
+  if (!TIPOS_EVENTO.includes(tipo)) {
+    return res.status(400).json({ error: `Tipo inválido. Usa uno de: ${TIPOS_EVENTO.join(", ")}` });
+  }
+  if (!Number.isFinite(duracion) || duracion <= 0 || duracion > 72) {
+    return res.status(400).json({ error: '"duracion_horas" debe ser un número de horas simuladas entre 0 y 72' });
+  }
+  if (!Number.isFinite(enHoras) || enHoras < 0 || enHoras > 24) {
+    return res.status(400).json({ error: '"en_horas" debe estar entre 0 y 24' });
+  }
+  const evento = simulador.clima.programar({ tipo, duracionHoras: duracion, enHoras }, simulador.horaActualMs());
+  res.status(201).json(simulador.clima.describirEvento(evento, simulador.horaActualMs()));
+});
+
+// Cancela los eventos de clima en curso y los programados
+app.delete("/clima/eventos", (req, res) => {
+  res.json({ ok: true, eliminados: simulador.clima.limpiar() });
+});
+
+// Activa o desactiva los eventos aleatorios: {"activo": true|false}
+app.post("/clima/aleatorio", (req, res) => {
+  simulador.clima.aleatorios = (req.body || {}).activo !== false;
+  res.json({ ok: true, eventos_aleatorios: simulador.clima.aleatorios });
 });
 
 // Hora simulada para el motor de riego de fincas-service

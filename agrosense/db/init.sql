@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS parcelas (
     humedad_min DECIMAL(5,2) DEFAULT 30.00,
     humedad_max DECIMAL(5,2) DEFAULT 85.00,
     temperatura_max DECIMAL(5,2) DEFAULT 38.00,
+    -- Debajo de esta temperatura se genera la alerta de helada
+    temperatura_min DECIMAL(5,2) DEFAULT 5.00,
     -- Si está activo, el motor de riego riega solo cuando la humedad baja del mínimo
     riego_automatico BOOLEAN NOT NULL DEFAULT FALSE,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -69,14 +71,32 @@ CREATE TABLE IF NOT EXISTS lecturas (
     INDEX idx_estacion_fecha (estacion_id, fecha)
 );
 
+-- Una alerta vigente (activa o atendida) por (parcela, tipo): mientras la
+-- condición sigue se actualiza (repeticiones, último valor) y al terminar se
+-- marca resuelta. Las climáticas no tienen estación.
+-- (Columnas de ciclo de vida: ver db/migrations/003_alertas_clima.sql.)
 CREATE TABLE IF NOT EXISTS alertas (
     id INT AUTO_INCREMENT PRIMARY KEY,
     parcela_id INT NOT NULL,
-    estacion_id INT NOT NULL,
+    estacion_id INT NULL,
     tipo VARCHAR(100) NOT NULL,
+    categoria ENUM('sensor', 'climatica') NOT NULL DEFAULT 'sensor',
+    severidad ENUM('info', 'media', 'alta') NOT NULL DEFAULT 'media',
+    estado ENUM('activa', 'atendida', 'resuelta') NOT NULL DEFAULT 'activa',
+    detalle VARCHAR(255) NULL,
+    repeticiones INT NOT NULL DEFAULT 1,
+    ultimo_valor DECIMAL(6,2) NULL,
+    ultima_lectura_en TIMESTAMP NULL,
+    atendida_por INT NULL,
+    atendida_en TIMESTAMP NULL,
+    resuelta_en TIMESTAMP NULL,
+    clave_vigente VARCHAR(160) AS (IF(estado IN ('activa', 'atendida'), CONCAT(parcela_id, ':', tipo), NULL)) PERSISTENT,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (parcela_id) REFERENCES parcelas(id),
-    FOREIGN KEY (estacion_id) REFERENCES estaciones(id)
+    FOREIGN KEY (estacion_id) REFERENCES estaciones(id),
+    CONSTRAINT fk_alertas_atendida_por FOREIGN KEY (atendida_por) REFERENCES usuarios(id) ON DELETE SET NULL,
+    UNIQUE KEY uq_alertas_vigente (clave_vigente),
+    INDEX idx_alertas_estado (estado, severidad)
 );
 
 -- Parcelas asignadas a cada usuario (un agricultor puede tener varias)
@@ -150,7 +170,8 @@ CREATE TABLE IF NOT EXISTS riego_eventos (
     inicio DATETIME NOT NULL,
     fin DATETIME NULL,
     duracion_minutos INT NOT NULL,
-    estado ENUM('en_curso', 'completado', 'cancelado') NOT NULL DEFAULT 'en_curso',
+    estado ENUM('en_curso', 'completado', 'cancelado', 'omitido') NOT NULL DEFAULT 'en_curso',
+    motivo VARCHAR(255) NULL,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE,
     FOREIGN KEY (programacion_id) REFERENCES riego_programaciones(id) ON DELETE SET NULL,

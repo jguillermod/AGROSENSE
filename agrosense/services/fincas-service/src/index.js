@@ -63,6 +63,9 @@ function calcularEstado(p) {
   if (p.humedad_actual < p.humedad_min) return "Necesita riego";
   if (p.humedad_actual > p.humedad_max) return "Riesgo de hongos";
   if (p.temperatura_actual !== null && p.temperatura_actual > p.temperatura_max) return "Riesgo por calor";
+  if (p.temperatura_actual !== null && p.temperatura_min !== null && Number(p.temperatura_actual) < Number(p.temperatura_min)) {
+    return "Riesgo de helada";
+  }
   return "Óptimo";
 }
 
@@ -84,22 +87,30 @@ app.get("/api/fincas/:fincaId/parcelas", async (req, res) => {
   res.json(rows.map((p) => ({ ...p, estado: calcularEstado(p) })));
 });
 
+// temperatura_min (heladas) es opcional: si no llega o viene vacía, al crear
+// se usa 5 °C y al editar se conserva la que tenía (la app móvil todavía no
+// la envía y no debe borrarla).
+const temperaturaMin = (valor) => (valor === undefined || valor === null || valor === "" ? null : Number(valor));
+
 app.post("/api/parcelas", async (req, res) => {
   const { nombre, finca_id, humedad_min, humedad_max, temperatura_max } = req.body;
+  const tMin = temperaturaMin(req.body.temperatura_min);
   const [result] = await pool.query(
-    `INSERT INTO parcelas (nombre, finca_id, humedad_min, humedad_max, temperatura_max)
-     VALUES (?, ?, ?, ?, ?)`,
-    [nombre, finca_id, humedad_min, humedad_max, temperatura_max]
+    `INSERT INTO parcelas (nombre, finca_id, humedad_min, humedad_max, temperatura_max, temperatura_min)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [nombre, finca_id, humedad_min, humedad_max, temperatura_max, Number.isFinite(tMin) ? tMin : 5]
   );
   res.status(201).json({ id: result.insertId, nombre, finca_id });
 });
 
 app.put("/api/parcelas/:id", async (req, res) => {
   const { nombre, humedad_min, humedad_max, temperatura_max } = req.body;
+  const tMin = temperaturaMin(req.body.temperatura_min);
   const [result] = await pool.query(
-    `UPDATE parcelas SET nombre = ?, humedad_min = ?, humedad_max = ?, temperatura_max = ?
+    `UPDATE parcelas SET nombre = ?, humedad_min = ?, humedad_max = ?, temperatura_max = ?,
+            temperatura_min = COALESCE(?, temperatura_min)
      WHERE id = ?`,
-    [nombre, humedad_min, humedad_max, temperatura_max, req.params.id]
+    [nombre, humedad_min, humedad_max, temperatura_max, Number.isFinite(tMin) ? tMin : null, req.params.id]
   );
   if (result.affectedRows === 0) return res.status(404).json({ error: "Parcela no encontrada" });
   res.json({ id: Number(req.params.id), nombre, humedad_min, humedad_max, temperatura_max });
