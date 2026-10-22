@@ -50,6 +50,8 @@ services:
   lecturas-service-test:
     build: ./services/lecturas-service
     env_file: .env.test
+    environment:
+      SIMULATOR_SERVICE_URL: http://simulator-service-test:3000
     ports:
       - "4003:3000"
     depends_on:
@@ -74,16 +76,31 @@ services:
     volumes:
       - simulator_test_data:/data
 
+  backup-service-test:
+    build: ./services/backup-service
+    env_file: .env.test
+    ports:
+      - "4005:3000"
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+    volumes:
+      - backups_test_data:/backups
+
   web-admin-test:
     build: ./web-admin
     env_file: .env.test
+    environment:
+      BACKUP_SERVICE_URL: http://backup-service-test:3000
     ports:
       - "8090:3000"
     depends_on:
       - auth-service-test
       - fincas-service-test
       - lecturas-service-test
+      - backup-service-test
 
 volumes:
   mysql_test_data:
   simulator_test_data:
+  backups_test_data:

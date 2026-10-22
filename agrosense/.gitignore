@@ -29,3 +29,12 @@ Thumbs.db
 # Editor
 .vscode/
 *.iml
+
+# Respaldos de la base: contienen hashes de contraseñas y api_key_hash.
+# Viven en el volumen backups_data de Docker; nunca deben entrar al repo.
+backups/
+*.sql
+*.sql.gz
+# ...excepto el schema y las migraciones, que sí se versionan
+!db/init.sql
+!db/migrations/*.sql

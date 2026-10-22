@@ -85,6 +85,11 @@ services:
     container_name: agrosense-etl
     restart: unless-stopped
     env_file: .env
+    environment:
+      # en desarrollo, resúmenes cada 5 min para que la gráfica del dashboard avance durante la demo
+      ETL_INTERVAL_MINUTES: "5"
+      # que los print() del ETL aparezcan al momento en `docker logs`
+      PYTHONUNBUFFERED: "1"
     depends_on:
       mysql:
         condition: service_healthy
@@ -111,6 +116,22 @@ services:
       - /app/node_modules
       - simulator_data:/data
 
+  # Respaldos de la base (mariadb-dump) en su propio volumen, fuera del repo
+  backup-service:
+    build: ./services/backup-service
+    container_name: agrosense-backup
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3005:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./services/backup-service:/app
+      - /app/node_modules
+      - backups_data:/backups
+
   web-admin:
     build: ./web-admin
     container_name: agrosense-web
@@ -122,6 +143,7 @@ services:
       - auth-service
       - fincas-service
       - lecturas-service
+      - backup-service
     volumes:
       - ./web-admin:/app
       - /app/node_modules
@@ -129,3 +151,4 @@ services:
 volumes:
   mysql_data:
   simulator_data:
+  backups_data:
