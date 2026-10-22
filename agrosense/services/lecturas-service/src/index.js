@@ -72,6 +72,77 @@ app.post("/api/lecturas", async (req, res) => {
   }
 });
 
+// --- Lecturas en vivo (panel web) ---
+// Filtros opcionales comunes: parcela_id o finca_id. Se ordena por id
+// (orden de inserción) en vez de por fecha para usar la clave primaria y
+// no ordenar toda la tabla en cada consulta.
+function filtroUbicacion(query) {
+  const condiciones = [];
+  const params = [];
+  const parcelaId = Number(query.parcela_id);
+  const fincaId = Number(query.finca_id);
+  if (Number.isInteger(parcelaId) && parcelaId > 0) {
+    condiciones.push("p.id = ?");
+    params.push(parcelaId);
+  }
+  if (Number.isInteger(fincaId) && fincaId > 0) {
+    condiciones.push("p.finca_id = ?");
+    params.push(fincaId);
+  }
+  return { where: condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "", params };
+}
+
+const limite = (valor, porDefecto, maximo) => Math.min(maximo, Math.max(1, Number(valor) || porDefecto));
+
+// Últimas lecturas con su estación, parcela, finca y los umbrales de la
+// parcela (para colorear cada valor en el cliente).
+app.get("/api/lecturas/recientes", async (req, res) => {
+  try {
+    const { where, params } = filtroUbicacion(req.query);
+    const [rows] = await pool.query(
+      `SELECT l.id, l.estacion_id, e.codigo AS estacion_codigo,
+              p.id AS parcela_id, p.nombre AS parcela_nombre,
+              f.id AS finca_id, f.nombre AS finca_nombre,
+              l.humedad_suelo, l.temperatura, l.humedad_ambiental, l.fecha,
+              p.humedad_min, p.humedad_max, p.temperatura_max
+       FROM lecturas l
+       JOIN estaciones e ON e.id = l.estacion_id
+       JOIN parcelas p ON p.id = e.parcela_id
+       JOIN fincas f ON f.id = p.finca_id
+       ${where}
+       ORDER BY l.id DESC
+       LIMIT ?`,
+      [...params, limite(req.query.limit, 50, 500)]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al consultar las lecturas recientes" });
+  }
+});
+
+app.get("/api/alertas/recientes", async (req, res) => {
+  try {
+    const { where, params } = filtroUbicacion(req.query);
+    const [rows] = await pool.query(
+      `SELECT a.id, a.tipo, a.fecha, a.estacion_id, e.codigo AS estacion_codigo,
+              p.id AS parcela_id, p.nombre AS parcela_nombre, f.nombre AS finca_nombre
+       FROM alertas a
+       JOIN estaciones e ON e.id = a.estacion_id
+       JOIN parcelas p ON p.id = a.parcela_id
+       JOIN fincas f ON f.id = p.finca_id
+       ${where}
+       ORDER BY a.id DESC
+       LIMIT ?`,
+      [...params, limite(req.query.limit, 20, 200)]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al consultar las alertas recientes" });
+  }
+});
+
 // Historial de lecturas por estación (RF-05)
 app.get("/api/estaciones/:estacionId/lecturas", async (req, res) => {
   const [rows] = await pool.query(

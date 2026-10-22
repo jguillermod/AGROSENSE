@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <%- include('partials/head', { titulo: 'Lecturas en vivo' }) %>
+</head>
+<body>
+  <%
+    // Agrupa las parcelas por finca para el selector
+    const fincas = [];
+    parcelas.forEach(p => {
+      let f = fincas.find(x => x.id === p.finca_id);
+      if (!f) { f = { id: p.finca_id, nombre: p.finca_nombre, parcelas: [] }; fincas.push(f); }
+      f.parcelas.push(p);
+    });
+  %>
+  <div class="app-shell">
+    <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
+
+    <main class="main-content">
+      <div class="page-topbar">
+        <div>
+          <h2>Lecturas en vivo</h2>
+          <p class="page-subtitle live-status">
+            <span class="live-dot" id="live-dot"></span>
+            <span id="live-texto">Cargando…</span>
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <label class="sr-only" for="filtro">Finca o parcela</label>
+          <select class="finca-select" id="filtro">
+            <option value="">Todas las fincas y parcelas</option>
+            <% fincas.forEach(f => { %>
+              <optgroup label="<%= f.nombre %>">
+                <option value="finca:<%= f.id %>">Toda la finca</option>
+                <% f.parcelas.forEach(p => { %>
+                  <option value="parcela:<%= p.id %>"><%= p.nombre %></option>
+                <% }) %>
+              </optgroup>
+            <% }) %>
+          </select>
+          <button type="button" class="btn-secondary" id="btn-pausa">
+            <i class="bi bi-pause-fill"></i> <span>Pausar</span>
+          </button>
+        </div>
+      </div>
+
+      <% if (error) { %>
+        <p class="auth-message auth-message--error"><%= error %></p>
+      <% } %>
+      <p class="auth-message auth-message--error" id="error-carga" hidden></p>
+
+      <div class="live-grid">
+        <div class="panel-dark">
+          <h3 id="grafica-titulo">Humedad de suelo</h3>
+          <div class="live-chart-empty" id="grafica-vacia-wrap">
+            <i class="bi bi-graph-up"></i>
+            <p class="panel-empty" id="grafica-vacia">Elige una parcela en el selector para ver su gráfica de humedad de suelo.</p>
+          </div>
+          <div class="live-chart-wrap" id="grafica-wrap" hidden>
+            <canvas id="chart-humedad"></canvas>
+          </div>
+        </div>
+
+        <div class="live-alerts">
+          <h3><i class="bi bi-exclamation-triangle-fill"></i> Alertas recientes</h3>
+          <ul class="live-alerts-list" id="lista-alertas">
+            <li class="live-alerts-empty">Cargando…</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="section-title">Últimas 50 lecturas</h3>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Parcela</th><th>Estación</th><th>Humedad suelo</th><th>Temp.</th><th>Humedad amb.</th><th>Fecha y hora</th></tr>
+          </thead>
+          <tbody id="tabla-lecturas">
+            <tr><td colspan="6" class="data-table-empty">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="live-legend">
+        <span class="valor valor--ok">Verde</span> dentro de los umbrales de la parcela ·
+        <span class="valor valor--alerta">Rojo</span> fuera de rango (humedad de suelo fuera de mín./máx. o temperatura sobre la máxima).
+        La humedad ambiental no tiene umbral.
+      </p>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script>
+    const INTERVALO_MS = 5000;
+    const COLORES = ['#66bb6a', '#e6a23c', '#26a69a', '#5c6bc0', '#ef5350', '#ab47bc'];
+
+    const filtro = document.getElementById('filtro');
+    const btnPausa = document.getElementById('btn-pausa');
+    const liveDot = document.getElementById('live-dot');
+    const liveTexto = document.getElementById('live-texto');
+    const errorCarga = document.getElementById('error-carga');
+
+    let pausado = false;
+    let timer = null;
+    let controlador = null;
+    let ultimaActualizacion = null;
+    let chart = null;
+
+    const escapar = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const num = (v) => (v === null || v === undefined ? null : Number(v));
+    const fmt = (v, unidad) => (v === null ? '—' : v.toFixed(1) + unidad);
+    const hora = (fecha) => new Date(fecha).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const fechaHora = (fecha) => new Date(fecha).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // Restaura la selección desde la URL (?parcela=ID o ?finca=ID)
+    (function restaurarFiltro() {
+      const q = new URLSearchParams(location.search);
+      const valor = q.get('parcela') ? 'parcela:' + q.get('parcela') : q.get('finca') ? 'finca:' + q.get('finca') : '';
+      if ([...filtro.options].some((o) => o.value === valor)) filtro.value = valor;
+    })();
+
+    function filtroActual() {
+      const [tipo, id] = filtro.value.split(':');
+      return { tipo: tipo || null, id: id || null };
+    }
+
+    // Cada carga cancela la anterior si sigue en curso, así un cambio de
+    // selección nunca queda pisado por una respuesta vieja.
+    async function cargar() {
+      if (controlador) controlador.abort();
+      controlador = new AbortController();
+      const { signal } = controlador;
+      const { tipo, id } = filtroActual();
+      const params = new URLSearchParams();
+      if (tipo === 'parcela') params.set('parcela_id', id);
+      if (tipo === 'finca') params.set('finca_id', id);
+
+      try {
+        const res = await fetch('/lecturas/datos?' + params, { headers: { Accept: 'application/json' }, signal });
+        // requireAuth redirige a /login cuando la sesión expiró
+        if (res.redirected || !(res.headers.get('content-type') || '').includes('application/json')) {
+          location.href = '/login';
+          return;
+        }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Error al cargar');
+        pintarTabla(data.lecturas);
+        pintarAlertas(data.alertas);
+        pintarGrafica(tipo === 'parcela' ? data.grafica : null);
+        ultimaActualizacion = new Date();
+        errorCarga.hidden = true;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        errorCarga.textContent = err.message + '. Se reintentará en unos segundos.';
+        errorCarga.hidden = false;
+      } finally {
+        if (!signal.aborted) pintarEstado();
+      }
+    }
+
+    function claseValor(valor, min, max) {
+      if (valor === null) return '';
+      const fuera = (min !== null && valor < min) || (max !== null && valor > max);
+      return fuera ? 'valor valor--alerta' : 'valor valor--ok';
+    }
+
+    function pintarTabla(lecturas) {
+      const tbody = document.getElementById('tabla-lecturas');
+      if (lecturas.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="data-table-empty">Todavía no hay lecturas para esta selección.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = lecturas.map((l) => {
+        const suelo = num(l.humedad_suelo);
+        const temp = num(l.temperatura);
+        const hr = num(l.humedad_ambiental);
+        return `<tr>
+          <td>${escapar(l.parcela_nombre)}<div class="cell-sub">${escapar(l.finca_nombre)}</div></td>
+          <td>${escapar(l.estacion_codigo)}</td>
+          <td><span class="${claseValor(suelo, num(l.humedad_min), num(l.humedad_max))}">${fmt(suelo, '%')}</span></td>
+          <td><span class="${claseValor(temp, null, num(l.temperatura_max))}">${fmt(temp, '°C')}</span></td>
+          <td>${fmt(hr, '%')}</td>
+          <td>${fechaHora(l.fecha)}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    const BADGE_ALERTA = {
+      'Necesita riego': 'badge--warning',
+      'Riesgo de exceso de humedad': 'badge--danger',
+      'Riesgo de estrés hídrico por calor': 'badge--danger',
+    };
+
+    function pintarAlertas(alertas) {
+      const ul = document.getElementById('lista-alertas');
+      if (alertas.length === 0) {
+        ul.innerHTML = '<li class="live-alerts-empty">Sin alertas para esta selección.</li>';
+        return;
+      }
+      ul.innerHTML = alertas.map((a) => `<li>
+          <span class="badge ${BADGE_ALERTA[a.tipo] || 'badge--neutral'}">${escapar(a.tipo)}</span>
+          <div class="live-alert-meta">
+            <strong>${escapar(a.parcela_nombre)}</strong> · ${escapar(a.estacion_codigo)}
+            <span>${fechaHora(a.fecha)}</span>
+          </div>
+        </li>`).join('');
+    }
+
+    function pintarGrafica(lecturas) {
+      const vacia = document.getElementById('grafica-vacia');
+      const vaciaWrap = document.getElementById('grafica-vacia-wrap');
+      const wrap = document.getElementById('grafica-wrap');
+      const titulo = document.getElementById('grafica-titulo');
+
+      if (!lecturas) {
+        titulo.textContent = 'Humedad de suelo';
+        vacia.textContent = 'Elige una parcela en el selector para ver su gráfica de humedad de suelo.';
+        vaciaWrap.hidden = false;
+        wrap.hidden = true;
+        return;
+      }
+      titulo.textContent = 'Humedad de suelo · ' + filtro.options[filtro.selectedIndex].text;
+      if (lecturas.length === 0) {
+        vacia.textContent = 'Esta parcela todavía no tiene lecturas.';
+        vaciaWrap.hidden = false;
+        wrap.hidden = true;
+        return;
+      }
+      vaciaWrap.hidden = true;
+      wrap.hidden = false;
+
+      // Una línea por estación, en orden cronológico, más los umbrales
+      const porEstacion = {};
+      [...lecturas].reverse().forEach((l) => {
+        (porEstacion[l.estacion_codigo] = porEstacion[l.estacion_codigo] || []).push({
+          x: new Date(l.fecha).getTime(),
+          y: Number(l.humedad_suelo),
+        });
+      });
+      const xs = lecturas.map((l) => new Date(l.fecha).getTime());
+      const xMin = Math.min(...xs);
+      const xMax = Math.max(...xs);
+      const umbral = (valor, etiqueta, color) => ({
+        label: etiqueta,
+        data: [{ x: xMin, y: valor }, { x: xMax, y: valor }],
+        borderColor: color,
+        borderDash: [6, 5],
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: false,
+      });
+
+      const datasets = Object.entries(porEstacion).map(([codigo, puntos], i) => ({
+        label: codigo,
+        data: puntos,
+        borderColor: COLORES[i % COLORES.length],
+        backgroundColor: COLORES[i % COLORES.length],
+        tension: 0.3,
+        pointRadius: 0,
+        borderWidth: 2,
+      }));
+      datasets.push(umbral(Number(lecturas[0].humedad_min), 'Mínimo', '#e6a23c'));
+      datasets.push(umbral(Number(lecturas[0].humedad_max), 'Máximo', '#ef5350'));
+
+      if (!chart) {
+        chart = new Chart(document.getElementById('chart-humedad'), {
+          type: 'line',
+          data: { datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { mode: 'nearest', intersect: false },
+            plugins: {
+              legend: { labels: { color: '#e8ece4', boxWidth: 14 } },
+              tooltip: {
+                callbacks: {
+                  title: (items) => hora(items[0].parsed.x),
+                  label: (item) => `${item.dataset.label}: ${item.parsed.y.toFixed(1)}%`,
+                },
+              },
+            },
+            scales: {
+              x: {
+                type: 'linear',
+                ticks: { color: '#b7c2ae', maxTicksLimit: 6, callback: (v) => hora(v) },
+                grid: { color: 'rgba(255,255,255,0.06)' },
+              },
+              y: {
+                suggestedMin: 0,
+                suggestedMax: 100,
+                ticks: { color: '#b7c2ae', callback: (v) => v + '%' },
+                grid: { color: 'rgba(255,255,255,0.06)' },
+              },
+            },
+          },
+        });
+      } else {
+        chart.data.datasets = datasets;
+      }
+      // el eje X cubre exactamente el rango de las lecturas
+      chart.options.scales.x.min = xMin;
+      chart.options.scales.x.max = xMax;
+      chart.update('none');
+    }
+
+    function pintarEstado() {
+      const cuando = ultimaActualizacion ? 'Última actualización: ' + hora(ultimaActualizacion) : 'Sin datos todavía';
+      liveTexto.textContent = pausado ? `En pausa · ${cuando}` : `Actualizando cada ${INTERVALO_MS / 1000} s · ${cuando}`;
+      liveDot.classList.toggle('live-dot--pausado', pausado);
+      btnPausa.innerHTML = pausado
+        ? '<i class="bi bi-play-fill"></i> <span>Reanudar</span>'
+        : '<i class="bi bi-pause-fill"></i> <span>Pausar</span>';
+    }
+
+    function programar() {
+      clearInterval(timer);
+      timer = pausado ? null : setInterval(cargar, INTERVALO_MS);
+    }
+
+    btnPausa.addEventListener('click', () => {
+      pausado = !pausado;
+      programar();
+      if (!pausado) cargar();
+      pintarEstado();
+    });
+
+    filtro.addEventListener('change', () => {
+      const { tipo, id } = filtroActual();
+      history.replaceState(null, '', tipo ? `/lecturas?${tipo}=${id}` : '/lecturas');
+      cargar();
+      programar();
+    });
+
+    cargar();
+    programar();
+  </script>
+</body>
+</html>

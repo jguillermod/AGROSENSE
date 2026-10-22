@@ -69,14 +69,26 @@
     <div class="modal-box modal-box--wide">
       <h3><i class="bi bi-person-plus-fill"></i> Nuevo usuario</h3>
       <form method="POST" action="/usuarios">
-        <input type="text" name="nombre" placeholder="Nombre completo" required>
-        <input type="email" name="email" placeholder="Correo electrónico" required>
-        <input type="password" name="password" placeholder="Contraseña" required>
-        <select name="rol" required>
-          <option value="" disabled selected>Selecciona un rol</option>
-          <option value="agricultor">Agricultor</option>
-          <option value="admin">Administrador</option>
-        </select>
+        <div class="form-field">
+          <label for="nuevo-usuario-nombre">Nombre completo</label>
+          <input type="text" name="nombre" id="nuevo-usuario-nombre" required>
+        </div>
+        <div class="form-field">
+          <label for="nuevo-usuario-email">Correo electrónico</label>
+          <input type="email" name="email" id="nuevo-usuario-email" placeholder="nombre@correo.com" required>
+        </div>
+        <div class="form-field">
+          <label for="nuevo-usuario-password">Contraseña</label>
+          <input type="password" name="password" id="nuevo-usuario-password" required>
+        </div>
+        <div class="form-field">
+          <label for="nuevo-usuario-rol">Rol</label>
+          <select name="rol" id="nuevo-usuario-rol" required>
+            <option value="" disabled selected>Selecciona un rol</option>
+            <option value="agricultor">Agricultor</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
 
         <div class="field-group">
           <label class="field-group-label">Parcelas asignadas</label>
@@ -105,13 +117,26 @@
     <div class="modal-box modal-box--wide">
       <h3><i class="bi bi-pencil-fill"></i> Editar usuario</h3>
       <form method="POST" id="form-editar-usuario" action="/usuarios/0/editar">
-        <input type="text" name="nombre" id="editar-usuario-nombre" placeholder="Nombre completo" required>
-        <input type="email" name="email" id="editar-usuario-email" placeholder="Correo electrónico" required>
-        <input type="password" name="password" placeholder="Nueva contraseña (dejar en blanco para no cambiar)">
-        <select name="rol" id="editar-usuario-rol" required>
-          <option value="agricultor">Agricultor</option>
-          <option value="admin">Administrador</option>
-        </select>
+        <div class="form-field">
+          <label for="editar-usuario-nombre">Nombre completo</label>
+          <input type="text" name="nombre" id="editar-usuario-nombre" required>
+        </div>
+        <div class="form-field">
+          <label for="editar-usuario-email">Correo electrónico</label>
+          <input type="email" name="email" id="editar-usuario-email" required>
+        </div>
+        <div class="form-field">
+          <label for="editar-usuario-password">Nueva contraseña</label>
+          <input type="password" name="password" id="editar-usuario-password">
+          <p class="form-field-hint">Déjala en blanco para no cambiarla.</p>
+        </div>
+        <div class="form-field">
+          <label for="editar-usuario-rol">Rol</label>
+          <select name="rol" id="editar-usuario-rol" required>
+            <option value="agricultor">Agricultor</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
 
         <div class="field-group">
           <label class="field-group-label">Parcelas asignadas</label>

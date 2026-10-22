@@ -92,10 +92,25 @@
       <h3><i class="bi bi-map-fill"></i> Nueva parcela</h3>
       <form method="POST" action="/parcelas">
         <input type="hidden" name="finca_id" value="<%= fincaActiva ? fincaActiva.id : '' %>">
-        <input type="text" name="nombre" placeholder="Nombre de la parcela" required>
-        <input type="number" step="0.1" name="humedad_min" placeholder="Humedad mínima (%)">
-        <input type="number" step="0.1" name="humedad_max" placeholder="Humedad máxima (%)">
-        <input type="number" step="0.1" name="temperatura_max" placeholder="Temperatura máxima (°C)">
+        <div class="form-field">
+          <label for="nueva-nombre">Nombre</label>
+          <input type="text" name="nombre" id="nueva-nombre" placeholder="Ej. Lote norte" required>
+        </div>
+        <div class="form-field">
+          <label for="nueva-humedad-min">Humedad mínima (%)</label>
+          <input type="number" step="0.1" min="0" max="100" name="humedad_min" id="nueva-humedad-min" placeholder="Ej. 30">
+          <p class="form-field-hint">Debajo de este valor se genera la alerta "Necesita riego".</p>
+        </div>
+        <div class="form-field">
+          <label for="nueva-humedad-max">Humedad máxima (%)</label>
+          <input type="number" step="0.1" min="0" max="100" name="humedad_max" id="nueva-humedad-max" placeholder="Ej. 85">
+          <p class="form-field-hint">Arriba de este valor se genera la alerta "Riesgo de exceso de humedad".</p>
+        </div>
+        <div class="form-field">
+          <label for="nueva-temperatura-max">Temperatura máxima (°C)</label>
+          <input type="number" step="0.1" name="temperatura_max" id="nueva-temperatura-max" placeholder="Ej. 38">
+          <p class="form-field-hint">Arriba de este valor se genera la alerta "Riesgo de estrés hídrico por calor".</p>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn-secondary" onclick="document.getElementById('modal-parcela').classList.remove('open')">Cancelar</button>
           <button type="submit" class="btn-primary">Guardar</button>
@@ -109,10 +124,25 @@
       <h3><i class="bi bi-pencil-fill"></i> Editar parcela</h3>
       <form method="POST" id="form-editar-parcela" action="/parcelas/0/editar">
         <input type="hidden" name="finca_id" value="<%= fincaActiva ? fincaActiva.id : '' %>">
-        <input type="text" name="nombre" id="editar-nombre" placeholder="Nombre de la parcela" required>
-        <input type="number" step="0.1" name="humedad_min" id="editar-humedad-min" placeholder="Humedad mínima (%)">
-        <input type="number" step="0.1" name="humedad_max" id="editar-humedad-max" placeholder="Humedad máxima (%)">
-        <input type="number" step="0.1" name="temperatura_max" id="editar-temperatura-max" placeholder="Temperatura máxima (°C)">
+        <div class="form-field">
+          <label for="editar-nombre">Nombre</label>
+          <input type="text" name="nombre" id="editar-nombre" placeholder="Ej. Lote norte" required>
+        </div>
+        <div class="form-field">
+          <label for="editar-humedad-min">Humedad mínima (%)</label>
+          <input type="number" step="0.1" min="0" max="100" name="humedad_min" id="editar-humedad-min" placeholder="Ej. 30">
+          <p class="form-field-hint">Debajo de este valor se genera la alerta "Necesita riego".</p>
+        </div>
+        <div class="form-field">
+          <label for="editar-humedad-max">Humedad máxima (%)</label>
+          <input type="number" step="0.1" min="0" max="100" name="humedad_max" id="editar-humedad-max" placeholder="Ej. 85">
+          <p class="form-field-hint">Arriba de este valor se genera la alerta "Riesgo de exceso de humedad".</p>
+        </div>
+        <div class="form-field">
+          <label for="editar-temperatura-max">Temperatura máxima (°C)</label>
+          <input type="number" step="0.1" name="temperatura_max" id="editar-temperatura-max" placeholder="Ej. 38">
+          <p class="form-field-hint">Arriba de este valor se genera la alerta "Riesgo de estrés hídrico por calor".</p>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn-secondary" onclick="document.getElementById('modal-editar-parcela').classList.remove('open')">Cancelar</button>
           <button type="submit" class="btn-primary">Guardar cambios</button>
