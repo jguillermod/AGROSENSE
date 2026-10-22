@@ -214,7 +214,9 @@ class RiegoSectionState extends State<RiegoSection> {
               ...resumen.ultimosRiegos.map((r) => _fila(
                     r.estado == 'en_curso' ? Icons.water_drop : Icons.history,
                     '${r.origenTexto}${r.programacionNombre != null ? ' · ${r.programacionNombre}' : ''}',
-                    '${_formatoFecha.format(r.inicio)} · ${r.duracionMinutos} min · ${r.estadoTexto}',
+                    r.estado == 'omitido'
+                        ? '${_formatoFecha.format(r.inicio)} · ${r.motivo ?? r.estadoTexto}'
+                        : '${_formatoFecha.format(r.inicio)} · ${r.duracionMinutos} min · ${r.estadoTexto}',
                   )),
             if (resumen.reloj != null)
               Padding(

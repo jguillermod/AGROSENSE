@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 
 import 'config/theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_shell.dart';
 import 'services/auth_service.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Fechas y números en español (DateFormat/NumberFormat sin locale explícito)
+  Intl.defaultLocale = 'es';
+  await initializeDateFormatting('es');
   runApp(const AgroSenseApp());
 }
 
@@ -18,6 +25,14 @@ class AgroSenseApp extends StatelessWidget {
       title: 'AgroSense',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+      // Español en calendarios, selectores de hora y textos de Material
+      locale: const Locale('es'),
+      supportedLocales: const [Locale('es'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       // Limita el escalado de fuente del sistema operativo: respeta la
       // preferencia de accesibilidad del usuario pero evita que un texto
       // extremadamente grande (o muy pequeño) rompa el layout de tarjetas,

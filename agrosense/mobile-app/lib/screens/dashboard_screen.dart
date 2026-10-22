@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../services/auth_service.dart';
 import '../services/data_service.dart';
 import '../widgets/common.dart';
+import 'alertas_screen.dart';
 
 const _coloresFinca = [
   Color(0xFF66BB6A),
@@ -15,6 +16,17 @@ const _coloresFinca = [
   Color(0xFF5C6BC0),
   Color(0xFFEF5350),
 ];
+
+/// Todo lo que muestra el dashboard. Alertas y clima son opcionales: si su
+/// servicio no responde, el resto del dashboard se muestra igual.
+class _DatosDashboard {
+  final DashboardResumen resumen;
+  final List<HistorialPunto> historial;
+  final AlertasConteo? conteo;
+  final Clima? clima;
+
+  _DatosDashboard(this.resumen, this.historial, this.conteo, this.clima);
+}
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -26,7 +38,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final _authService = AuthService();
   final _dataService = DataService();
-  late Future<(DashboardResumen, List<HistorialPunto>)> _future;
+  late Future<_DatosDashboard> _future;
 
   @override
   void initState() {
@@ -34,11 +46,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _future = _cargar();
   }
 
-  Future<(DashboardResumen, List<HistorialPunto>)> _cargar() async {
+  Future<_DatosDashboard> _cargar() async {
     final usuarioId = await _authService.getUsuarioId();
+    final opcionales = await Future.wait<Object?>([
+      _dataService.getConteoAlertas(usuarioId: usuarioId!).then<Object?>((c) => c).catchError((_) => null),
+      _dataService.getClima().then<Object?>((c) => c).catchError((_) => null),
+    ]);
     final resumen = await _dataService.getDashboardResumen(usuarioId: usuarioId);
     final historial = await _dataService.getDashboardHistorial(dias: 7);
-    return (resumen, historial);
+    return _DatosDashboard(resumen, historial, opcionales[0] as AlertasConteo?, opcionales[1] as Clima?);
+  }
+
+  Future<void> _abrirAlertas() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AlertasScreen()));
+    if (mounted) _refrescar();
   }
 
   Future<void> _refrescar() async {
@@ -49,10 +70,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Dashboard')),
+      appBar: AppBar(
+        title: const Text('Dashboard'),
+        actions: [
+          FutureBuilder<_DatosDashboard>(
+            future: _future,
+            builder: (context, snapshot) {
+              final activas = snapshot.data?.conteo?.activas ?? 0;
+              return IconButton(
+                tooltip: 'Alertas',
+                onPressed: _abrirAlertas,
+                icon: Badge(
+                  isLabelVisible: activas > 0,
+                  label: Text(activas > 99 ? '99+' : '$activas'),
+                  backgroundColor: (snapshot.data?.conteo?.alta ?? 0) > 0 ? AppTheme.danger : AppTheme.warning,
+                  child: const Icon(Icons.notifications_outlined),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _refrescar,
-        child: FutureBuilder<(DashboardResumen, List<HistorialPunto>)>(
+        child: FutureBuilder<_DatosDashboard>(
           future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
@@ -62,7 +103,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               return buildErrorState('No se pudo cargar el dashboard');
             }
 
-            final (resumen, historial) = snapshot.data!;
+            final datos = snapshot.data!;
+            final resumen = datos.resumen;
+            final historial = datos.historial;
+            final conteo = datos.conteo;
 
             // El alto de cada tarjeta se calcula a partir del ancho
             // disponible y del escalado de fuente del dispositivo, para
@@ -90,10 +134,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       label: 'Estaciones activas',
                     ),
                     _StatCard(
-                      icon: Icons.warning_amber_rounded,
+                      icon: Icons.notifications_active_outlined,
                       color: AppTheme.warning,
-                      value: '${resumen.alertasHoy}',
-                      label: 'Alertas hoy',
+                      value: conteo != null ? '${conteo.activas}' : '—',
+                      label: conteo != null
+                          ? 'Alertas activas · ${conteo.alta} altas, ${conteo.media} medias'
+                          : 'Alertas activas',
+                      onTap: _abrirAlertas,
                     ),
                     _StatCard(
                       icon: Icons.water_drop,
@@ -121,6 +168,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 16),
+                _ClimaCard(clima: datos.clima),
                 const SizedBox(height: 20),
                 const Text(
                   'Humedad promedio por finca (7 días)',
@@ -153,12 +202,13 @@ class _StatCard extends StatelessWidget {
   final Color color;
   final String value;
   final String label;
+  final VoidCallback? onTap;
 
-  const _StatCard({required this.icon, required this.color, required this.value, required this.label});
+  const _StatCard({required this.icon, required this.color, required this.value, required this.label, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final tarjeta = Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: LinearGradient(colors: [color, color.withValues(alpha: 0.75)], begin: Alignment.topLeft, end: Alignment.bottomRight),
@@ -182,6 +232,116 @@ class _StatCard extends StatelessWidget {
             style: const TextStyle(color: Colors.white, fontSize: 12),
           ),
         ],
+      ),
+    );
+    if (onTap == null) return tarjeta;
+    return GestureDetector(onTap: onTap, child: tarjeta);
+  }
+}
+
+/// Clima actual y pronóstico de las próximas horas (reloj de la simulación).
+class _ClimaCard extends StatelessWidget {
+  final Clima? clima;
+  const _ClimaCard({required this.clima});
+
+  static IconData _icono(String condicion) {
+    switch (condicion) {
+      case 'Lluvia':
+        return Icons.thunderstorm_outlined;
+      case 'Helada':
+        return Icons.ac_unit;
+      case 'Ola de calor':
+        return Icons.wb_sunny;
+      case 'Viento fuerte':
+        return Icons.air;
+      case 'Noche despejada':
+        return Icons.nightlight_round;
+      default:
+        return Icons.wb_sunny_outlined;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = clima;
+    final formatoHora = DateFormat('HH:mm');
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: c == null
+            ? const Row(
+                children: [
+                  Icon(Icons.cloud_off, color: AppTheme.neutralText),
+                  SizedBox(width: 10),
+                  Expanded(child: Text('Sin datos de clima en este momento', style: TextStyle(color: AppTheme.neutralText))),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(_icono(c.ahora.condicion), size: 40, color: AppTheme.warning),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${c.ahora.temperatura.round()}°C · ${c.ahora.condicion}',
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.darkGreen)),
+                            Text(
+                              '${c.fincaNombre ?? 'Clima'} · ${formatoHora.format(c.ahora.fechaHora)} · '
+                              '${c.ahora.lluviaMm} mm/h · ${c.ahora.vientoKmh} km/h',
+                              style: const TextStyle(fontSize: 12, color: AppTheme.neutralText),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 78,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        for (final h in c.pronostico.where((h) => h.fechaHora.hour.isOdd).take(8))
+                          Container(
+                            width: 62,
+                            margin: const EdgeInsets.only(right: 6),
+                            decoration: BoxDecoration(
+                              color: h.evento != null ? const Color(0xFFFDF1DC) : AppTheme.background,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(formatoHora.format(h.fechaHora), style: const TextStyle(fontSize: 11, color: AppTheme.neutralText)),
+                                Icon(_icono(h.condicion), size: 20, color: AppTheme.primaryGreen),
+                                Text('${h.temperatura.round()}°', style: const TextStyle(fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (c.eventos.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: c.eventos
+                          .map((e) => EstadoBadge(
+                                texto: e.enCurso
+                                    ? '${e.nombre}: hasta ${formatoHora.format(e.hasta)}'
+                                    : '${e.nombre}: desde ${formatoHora.format(e.desde)}',
+                                color: e.enCurso ? AppTheme.danger : AppTheme.warning,
+                              ))
+                          .toList(),
+                    ),
+                  ],
+                ],
+              ),
       ),
     );
   }

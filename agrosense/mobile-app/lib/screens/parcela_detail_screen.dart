@@ -366,9 +366,17 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
           child: Column(
             children: alertas.map((alerta) {
               return ListTile(
-                leading: const Icon(Icons.warning_amber_rounded, color: AppTheme.warning),
+                leading: Icon(
+                  alerta.esClimatica ? Icons.cloud_outlined : Icons.warning_amber_rounded,
+                  color: colorSeveridad(alerta.severidad),
+                ),
                 title: Text(alerta.tipo),
-                subtitle: Text(DateFormat('dd/MM/yyyy HH:mm').format(alerta.fecha)),
+                subtitle: Text(
+                  '${alerta.detalle != null ? '${alerta.detalle}\n' : ''}'
+                  'Desde ${DateFormat('dd/MM/yyyy HH:mm').format(alerta.fecha)}'
+                  '${alerta.estado == 'atendida' ? ' · atendida' : ''}',
+                ),
+                isThreeLine: alerta.detalle != null,
               );
             }).toList(),
           ),

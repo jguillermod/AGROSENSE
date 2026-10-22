@@ -12,9 +12,33 @@ Color colorEstadoParcela(String? estado) {
       return AppTheme.primaryGreen;
     case 'Riesgo de hongos':
     case 'Riesgo por calor':
+    case 'Riesgo de helada':
       return AppTheme.danger;
     default:
       return AppTheme.neutralText;
+  }
+}
+
+/// Color por severidad de alerta (igual que el panel web).
+Color colorSeveridad(String severidad) {
+  switch (severidad) {
+    case 'alta':
+      return AppTheme.danger;
+    case 'media':
+      return AppTheme.warning;
+    default:
+      return const Color(0xFF1565C0);
+  }
+}
+
+Color colorEstadoAlerta(String estado) {
+  switch (estado) {
+    case 'activa':
+      return AppTheme.danger;
+    case 'atendida':
+      return AppTheme.warning;
+    default:
+      return AppTheme.primaryGreen;
   }
 }
 

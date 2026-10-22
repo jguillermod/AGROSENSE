@@ -199,6 +199,42 @@ class DataService {
     return data.map((e) => Alerta.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  /// Alertas con filtros. [estado] acepta activa, atendida, resuelta o
+  /// "vigentes" (activas + atendidas); el agrónomo solo recibe las de sus parcelas.
+  Future<List<Alerta>> getAlertasFiltradas({required int usuarioId, String? severidad, String? estado}) async {
+    final query = {
+      'usuario_id': '$usuarioId',
+      'limit': '200',
+      'severidad': ?severidad,
+      'estado': ?estado,
+    };
+    final res = await http.get(Uri.parse('${ApiConfig.lecturasBaseUrl}/api/alertas').replace(queryParameters: query));
+    _checkOk(res, 'No se pudieron cargar las alertas');
+    final List<dynamic> data = jsonDecode(res.body);
+    return data.map((e) => Alerta.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<AlertasConteo> getConteoAlertas({required int usuarioId}) async {
+    final res = await http.get(Uri.parse('${ApiConfig.lecturasBaseUrl}/api/alertas/conteo?usuario_id=$usuarioId'));
+    _checkOk(res, 'No se pudieron contar las alertas');
+    return AlertasConteo.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  Future<void> atenderAlerta(int id, {required int usuarioId}) async {
+    final res = await http.put(
+      Uri.parse('${ApiConfig.lecturasBaseUrl}/api/alertas/$id/atender'),
+      headers: _jsonHeaders,
+      body: jsonEncode({'usuario_id': usuarioId}),
+    );
+    _checkOk(res, 'No se pudo marcar la alerta como atendida');
+  }
+
+  Future<Clima> getClima() async {
+    final res = await http.get(Uri.parse('${ApiConfig.lecturasBaseUrl}/api/clima'));
+    _checkOk(res, 'No hay datos de clima');
+    return Clima.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
   // --- Registros manuales de campo (humedad/temperatura + anotaciones) ---
 
   Future<List<RegistroManual>> getRegistros(int parcelaId) async {
@@ -222,8 +258,8 @@ class DataService {
       headers: _jsonHeaders,
       body: jsonEncode({
         'usuario_id': usuarioId,
-        if (humedadSuelo != null) 'humedad_suelo': humedadSuelo,
-        if (temperatura != null) 'temperatura': temperatura,
+        'humedad_suelo': ?humedadSuelo,
+        'temperatura': ?temperatura,
         if (anotaciones != null && anotaciones.isNotEmpty) 'anotaciones': anotaciones,
       }),
     );

@@ -165,28 +165,172 @@ class Lectura {
   }
 }
 
+/// Alerta de sensor o climática. Una por (parcela, tipo) mientras dura:
+/// activa (sin atender) → atendida (alguien se hizo cargo) → resuelta (la
+/// condición terminó, se cierra sola). Las climáticas no tienen estación.
 class Alerta {
+  static const severidades = {'alta': 'Alta', 'media': 'Media', 'info': 'Info'};
+  static const estados = {'activa': 'Activa', 'atendida': 'Atendida', 'resuelta': 'Resuelta'};
+
   final int id;
   final int parcelaId;
-  final int estacionId;
+  final String? parcelaNombre;
+  final String? fincaNombre;
+  final int? estacionId;
+  final String? estacionCodigo;
   final String tipo;
+  final String categoria;
+  final String severidad;
+  final String estado;
+  final String? detalle;
+  final int repeticiones;
   final DateTime fecha;
+  final DateTime? ultimaLecturaEn;
+  final String? atendidaPorNombre;
+  final DateTime? atendidaEn;
+  final DateTime? resueltaEn;
 
   Alerta({
     required this.id,
     required this.parcelaId,
-    required this.estacionId,
+    this.parcelaNombre,
+    this.fincaNombre,
+    this.estacionId,
+    this.estacionCodigo,
     required this.tipo,
+    this.categoria = 'sensor',
+    this.severidad = 'media',
+    this.estado = 'activa',
+    this.detalle,
+    this.repeticiones = 1,
     required this.fecha,
+    this.ultimaLecturaEn,
+    this.atendidaPorNombre,
+    this.atendidaEn,
+    this.resueltaEn,
   });
 
+  bool get esClimatica => categoria == 'climatica';
+  String get severidadTexto => severidades[severidad] ?? severidad;
+  String get estadoTexto => estados[estado] ?? estado;
+
   factory Alerta.fromJson(Map<String, dynamic> json) {
+    // Los TIMESTAMP llegan en UTC (ISO): se muestran en la hora del teléfono
+    DateTime? fecha(dynamic v) => v == null ? null : DateTime.tryParse(v.toString())?.toLocal();
     return Alerta(
       id: json['id'] as int,
       parcelaId: json['parcela_id'] as int,
-      estacionId: json['estacion_id'] as int,
+      parcelaNombre: json['parcela_nombre'] as String?,
+      fincaNombre: json['finca_nombre'] as String?,
+      estacionId: json['estacion_id'] as int?,
+      estacionCodigo: json['estacion_codigo'] as String?,
       tipo: json['tipo'] as String,
-      fecha: DateTime.tryParse(json['fecha'].toString()) ?? DateTime.now(),
+      categoria: json['categoria'] as String? ?? 'sensor',
+      severidad: json['severidad'] as String? ?? 'media',
+      estado: json['estado'] as String? ?? 'activa',
+      detalle: json['detalle'] as String?,
+      repeticiones: (json['repeticiones'] as num?)?.toInt() ?? 1,
+      fecha: fecha(json['fecha']) ?? DateTime.now(),
+      ultimaLecturaEn: fecha(json['ultima_lectura_en']),
+      atendidaPorNombre: json['atendida_por_nombre'] as String?,
+      atendidaEn: fecha(json['atendida_en']),
+      resueltaEn: fecha(json['resuelta_en']),
+    );
+  }
+}
+
+/// Alertas activas (sin atender) por severidad, para la insignia del dashboard.
+class AlertasConteo {
+  final int activas;
+  final int atendidas;
+  final int alta;
+  final int media;
+  final int info;
+
+  AlertasConteo({required this.activas, required this.atendidas, required this.alta, required this.media, required this.info});
+
+  factory AlertasConteo.fromJson(Map<String, dynamic> json) {
+    final s = json['por_severidad'] as Map<String, dynamic>? ?? {};
+    int n(dynamic v) => (v as num?)?.toInt() ?? 0;
+    return AlertasConteo(
+      activas: n(json['activas']),
+      atendidas: n(json['atendidas']),
+      alta: n(s['alta']),
+      media: n(s['media']),
+      info: n(s['info']),
+    );
+  }
+}
+
+/// Una hora de clima (actual o del pronóstico). La hora viene "de pared" en
+/// el reloj de la simulación (sin zona horaria).
+class ClimaHora {
+  final DateTime fechaHora;
+  final double temperatura;
+  final double lluviaMm;
+  final int vientoKmh;
+  final String condicion;
+  final String? evento;
+
+  ClimaHora({
+    required this.fechaHora,
+    required this.temperatura,
+    required this.lluviaMm,
+    required this.vientoKmh,
+    required this.condicion,
+    this.evento,
+  });
+
+  factory ClimaHora.fromJson(Map<String, dynamic> json) {
+    final evento = json['evento'];
+    return ClimaHora(
+      fechaHora: DateTime.tryParse(json['fecha_hora'].toString()) ?? DateTime.now(),
+      temperatura: (json['temperatura'] as num).toDouble(),
+      lluviaMm: (json['lluvia_mm'] as num).toDouble(),
+      vientoKmh: (json['viento_kmh'] as num).toInt(),
+      condicion: json['condicion'] as String,
+      evento: evento is Map ? evento['tipo'] as String? : evento as String?,
+    );
+  }
+}
+
+class ClimaEvento {
+  static const nombres = {'lluvia': 'Lluvia', 'helada': 'Helada', 'ola_calor': 'Ola de calor', 'viento': 'Viento fuerte'};
+
+  final String tipo;
+  final DateTime desde;
+  final DateTime hasta;
+  final bool enCurso;
+
+  ClimaEvento({required this.tipo, required this.desde, required this.hasta, required this.enCurso});
+
+  String get nombre => nombres[tipo] ?? tipo;
+
+  factory ClimaEvento.fromJson(Map<String, dynamic> json) {
+    return ClimaEvento(
+      tipo: json['tipo'] as String,
+      desde: DateTime.tryParse(json['desde'].toString()) ?? DateTime.now(),
+      hasta: DateTime.tryParse(json['hasta'].toString()) ?? DateTime.now(),
+      enCurso: json['en_curso'] == true,
+    );
+  }
+}
+
+/// Clima de la finca (GET /api/clima de lecturas-service).
+class Clima {
+  final String? fincaNombre;
+  final ClimaHora ahora;
+  final List<ClimaHora> pronostico;
+  final List<ClimaEvento> eventos;
+
+  Clima({this.fincaNombre, required this.ahora, required this.pronostico, required this.eventos});
+
+  factory Clima.fromJson(Map<String, dynamic> json) {
+    return Clima(
+      fincaNombre: (json['finca'] as Map<String, dynamic>?)?['nombre'] as String?,
+      ahora: ClimaHora.fromJson(json['ahora'] as Map<String, dynamic>),
+      pronostico: (json['pronostico'] as List<dynamic>).map((e) => ClimaHora.fromJson(e as Map<String, dynamic>)).toList(),
+      eventos: (json['eventos'] as List<dynamic>? ?? []).map((e) => ClimaEvento.fromJson(e as Map<String, dynamic>)).toList(),
     );
   }
 }
@@ -454,7 +598,7 @@ DateTime? _fechaRiego(dynamic v) => v == null ? null : DateTime.tryParse(v.toStr
 /// Un riego de la bitácora (en curso, completado o detenido).
 class RiegoEvento {
   static const origenes = {'programado': 'Programado', 'manual': 'Manual', 'automatico': 'Automático'};
-  static const estados = {'en_curso': 'En curso', 'completado': 'Completado', 'cancelado': 'Detenido'};
+  static const estados = {'en_curso': 'En curso', 'completado': 'Completado', 'cancelado': 'Detenido', 'omitido': 'Omitido'};
 
   final int id;
   final int parcelaId;
@@ -466,6 +610,9 @@ class RiegoEvento {
   final int duracionMinutos;
   final String estado;
 
+  /// Por qué no se hizo (p. ej. "Omitido por lluvia…"), solo en omitidos.
+  final String? motivo;
+
   RiegoEvento({
     required this.id,
     required this.parcelaId,
@@ -476,6 +623,7 @@ class RiegoEvento {
     this.finPrevisto,
     required this.duracionMinutos,
     required this.estado,
+    this.motivo,
   });
 
   String get origenTexto => origenes[origen] ?? origen;
@@ -492,6 +640,7 @@ class RiegoEvento {
       finPrevisto: _fechaRiego(json['fin_previsto']),
       duracionMinutos: (json['duracion_minutos'] as num).toInt(),
       estado: json['estado'] as String,
+      motivo: json['motivo'] as String?,
     );
   }
 }
