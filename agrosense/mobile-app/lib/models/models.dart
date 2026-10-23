@@ -2,6 +2,8 @@
 /// microservicios (fincas-service / lecturas-service).
 library;
 
+import 'json.dart';
+
 class Finca {
   final int id;
   final String nombre;
@@ -19,11 +21,11 @@ class Finca {
 
   factory Finca.fromJson(Map<String, dynamic> json) {
     return Finca(
-      id: json['id'] as int,
-      nombre: json['nombre'] as String,
-      ubicacion: json['ubicacion'] as String?,
-      usuarioId: json['usuario_id'] as int?,
-      creadoEn: json['creado_en'] != null ? DateTime.tryParse(json['creado_en']) : null,
+      id: jsonEntero(json['id']),
+      nombre: jsonTexto(json['nombre']),
+      ubicacion: jsonTextoOpt(json['ubicacion']),
+      usuarioId: jsonEnteroOpt(json['usuario_id']),
+      creadoEn: jsonFecha(json['creado_en']),
     );
   }
 }
@@ -61,25 +63,19 @@ class Parcela {
   });
 
   factory Parcela.fromJson(Map<String, dynamic> json) {
-    double? parseNum(dynamic v) {
-      if (v == null) return null;
-      if (v is num) return v.toDouble();
-      return double.tryParse(v.toString());
-    }
-
     return Parcela(
-      id: json['id'] as int,
-      nombre: json['nombre'] as String,
-      fincaId: json['finca_id'] as int,
-      humedadMin: parseNum(json['humedad_min']) ?? 30,
-      humedadMax: parseNum(json['humedad_max']) ?? 85,
-      temperaturaMax: parseNum(json['temperatura_max']) ?? 38,
-      humedadActual: parseNum(json['humedad_actual']),
-      temperaturaActual: parseNum(json['temperatura_actual']),
-      estado: json['estado'] as String?,
-      creadoEn: json['creado_en'] != null ? DateTime.tryParse(json['creado_en']) : null,
-      fincaNombre: json['finca_nombre'] as String?,
-      riegoAutomatico: json['riego_automatico'] == true || json['riego_automatico'] == 1,
+      id: jsonEntero(json['id']),
+      nombre: jsonTexto(json['nombre']),
+      fincaId: jsonEntero(json['finca_id']),
+      humedadMin: jsonDecimal(json['humedad_min'], 30),
+      humedadMax: jsonDecimal(json['humedad_max'], 85),
+      temperaturaMax: jsonDecimal(json['temperatura_max'], 38),
+      humedadActual: jsonDecimalOpt(json['humedad_actual']),
+      temperaturaActual: jsonDecimalOpt(json['temperatura_actual']),
+      estado: jsonTextoOpt(json['estado']),
+      creadoEn: jsonFecha(json['creado_en']),
+      fincaNombre: jsonTextoOpt(json['finca_nombre']),
+      riegoAutomatico: jsonBool(json['riego_automatico']),
     );
   }
 }
@@ -110,23 +106,17 @@ class Estacion {
   });
 
   factory Estacion.fromJson(Map<String, dynamic> json) {
-    double? parseNum(dynamic v) {
-      if (v == null) return null;
-      if (v is num) return v.toDouble();
-      return double.tryParse(v.toString());
-    }
-
     return Estacion(
-      id: json['id'] as int,
-      codigo: json['codigo'] as String,
-      parcelaId: json['parcela_id'] as int?,
-      parcelaNombre: json['parcela_nombre'] as String?,
-      fincaNombre: json['finca_nombre'] as String?,
-      humedadSuelo: parseNum(json['humedad_suelo']),
-      temperatura: parseNum(json['temperatura']),
-      humedadAmbiental: parseNum(json['humedad_ambiental']),
-      ultimaLectura: json['ultima_lectura'] != null ? DateTime.tryParse(json['ultima_lectura']) : null,
-      creadoEn: json['creado_en'] != null ? DateTime.tryParse(json['creado_en']) : null,
+      id: jsonEntero(json['id']),
+      codigo: jsonTexto(json['codigo']),
+      parcelaId: jsonEnteroOpt(json['parcela_id']),
+      parcelaNombre: jsonTextoOpt(json['parcela_nombre']),
+      fincaNombre: jsonTextoOpt(json['finca_nombre']),
+      humedadSuelo: jsonDecimalOpt(json['humedad_suelo']),
+      temperatura: jsonDecimalOpt(json['temperatura']),
+      humedadAmbiental: jsonDecimalOpt(json['humedad_ambiental']),
+      ultimaLectura: jsonFecha(json['ultima_lectura']),
+      creadoEn: jsonFecha(json['creado_en']),
     );
   }
 }
@@ -149,18 +139,13 @@ class Lectura {
   });
 
   factory Lectura.fromJson(Map<String, dynamic> json) {
-    double parseNum(dynamic v) {
-      if (v is num) return v.toDouble();
-      return double.tryParse(v.toString()) ?? 0;
-    }
-
     return Lectura(
-      id: json['id'] as int,
-      estacionId: json['estacion_id'] as int,
-      humedadSuelo: parseNum(json['humedad_suelo']),
-      temperatura: parseNum(json['temperatura']),
-      humedadAmbiental: parseNum(json['humedad_ambiental']),
-      fecha: DateTime.tryParse(json['fecha'].toString()) ?? DateTime.now(),
+      id: jsonEntero(json['id']),
+      estacionId: jsonEntero(json['estacion_id']),
+      humedadSuelo: jsonDecimal(json['humedad_suelo']),
+      temperatura: jsonDecimal(json['temperatura']),
+      humedadAmbiental: jsonDecimal(json['humedad_ambiental']),
+      fecha: jsonFecha(json['fecha']) ?? DateTime.now(),
     );
   }
 }
@@ -216,23 +201,23 @@ class Alerta {
 
   factory Alerta.fromJson(Map<String, dynamic> json) {
     // Los TIMESTAMP llegan en UTC (ISO): se muestran en la hora del teléfono
-    DateTime? fecha(dynamic v) => v == null ? null : DateTime.tryParse(v.toString())?.toLocal();
+    DateTime? fecha(dynamic v) => jsonFecha(v)?.toLocal();
     return Alerta(
-      id: json['id'] as int,
-      parcelaId: json['parcela_id'] as int,
-      parcelaNombre: json['parcela_nombre'] as String?,
-      fincaNombre: json['finca_nombre'] as String?,
-      estacionId: json['estacion_id'] as int?,
-      estacionCodigo: json['estacion_codigo'] as String?,
-      tipo: json['tipo'] as String,
-      categoria: json['categoria'] as String? ?? 'sensor',
-      severidad: json['severidad'] as String? ?? 'media',
-      estado: json['estado'] as String? ?? 'activa',
-      detalle: json['detalle'] as String?,
-      repeticiones: (json['repeticiones'] as num?)?.toInt() ?? 1,
+      id: jsonEntero(json['id']),
+      parcelaId: jsonEntero(json['parcela_id']),
+      parcelaNombre: jsonTextoOpt(json['parcela_nombre']),
+      fincaNombre: jsonTextoOpt(json['finca_nombre']),
+      estacionId: jsonEnteroOpt(json['estacion_id']),
+      estacionCodigo: jsonTextoOpt(json['estacion_codigo']),
+      tipo: jsonTexto(json['tipo']),
+      categoria: jsonTexto(json['categoria'], 'sensor'),
+      severidad: jsonTexto(json['severidad'], 'media'),
+      estado: jsonTexto(json['estado'], 'activa'),
+      detalle: jsonTextoOpt(json['detalle']),
+      repeticiones: jsonEntero(json['repeticiones'], 1),
       fecha: fecha(json['fecha']) ?? DateTime.now(),
       ultimaLecturaEn: fecha(json['ultima_lectura_en']),
-      atendidaPorNombre: json['atendida_por_nombre'] as String?,
+      atendidaPorNombre: jsonTextoOpt(json['atendida_por_nombre']),
       atendidaEn: fecha(json['atendida_en']),
       resueltaEn: fecha(json['resuelta_en']),
     );
@@ -250,14 +235,13 @@ class AlertasConteo {
   AlertasConteo({required this.activas, required this.atendidas, required this.alta, required this.media, required this.info});
 
   factory AlertasConteo.fromJson(Map<String, dynamic> json) {
-    final s = json['por_severidad'] as Map<String, dynamic>? ?? {};
-    int n(dynamic v) => (v as num?)?.toInt() ?? 0;
+    final s = jsonMapa(json['por_severidad']);
     return AlertasConteo(
-      activas: n(json['activas']),
-      atendidas: n(json['atendidas']),
-      alta: n(s['alta']),
-      media: n(s['media']),
-      info: n(s['info']),
+      activas: jsonEntero(json['activas']),
+      atendidas: jsonEntero(json['atendidas']),
+      alta: jsonEntero(s['alta']),
+      media: jsonEntero(s['media']),
+      info: jsonEntero(s['info']),
     );
   }
 }
@@ -284,12 +268,12 @@ class ClimaHora {
   factory ClimaHora.fromJson(Map<String, dynamic> json) {
     final evento = json['evento'];
     return ClimaHora(
-      fechaHora: DateTime.tryParse(json['fecha_hora'].toString()) ?? DateTime.now(),
-      temperatura: (json['temperatura'] as num).toDouble(),
-      lluviaMm: (json['lluvia_mm'] as num).toDouble(),
-      vientoKmh: (json['viento_kmh'] as num).toInt(),
-      condicion: json['condicion'] as String,
-      evento: evento is Map ? evento['tipo'] as String? : evento as String?,
+      fechaHora: jsonFecha(json['fecha_hora']) ?? DateTime.now(),
+      temperatura: jsonDecimal(json['temperatura']),
+      lluviaMm: jsonDecimal(json['lluvia_mm']),
+      vientoKmh: jsonEntero(json['viento_kmh']),
+      condicion: jsonTexto(json['condicion']),
+      evento: jsonTextoOpt(evento is Map ? evento['tipo'] : evento),
     );
   }
 }
@@ -308,9 +292,9 @@ class ClimaEvento {
 
   factory ClimaEvento.fromJson(Map<String, dynamic> json) {
     return ClimaEvento(
-      tipo: json['tipo'] as String,
-      desde: DateTime.tryParse(json['desde'].toString()) ?? DateTime.now(),
-      hasta: DateTime.tryParse(json['hasta'].toString()) ?? DateTime.now(),
+      tipo: jsonTexto(json['tipo']),
+      desde: jsonFecha(json['desde']) ?? DateTime.now(),
+      hasta: jsonFecha(json['hasta']) ?? DateTime.now(),
       enCurso: json['en_curso'] == true,
     );
   }
@@ -326,11 +310,14 @@ class Clima {
   Clima({this.fincaNombre, required this.ahora, required this.pronostico, required this.eventos});
 
   factory Clima.fromJson(Map<String, dynamic> json) {
+    // Sin el clima actual no hay nada que mostrar (antes que un "0°C" inventado):
+    // el dashboard atrapa el error y pone "Sin datos de clima".
+    if (json['ahora'] is! Map) throw const FormatException('La respuesta de clima no trae el clima actual');
     return Clima(
-      fincaNombre: (json['finca'] as Map<String, dynamic>?)?['nombre'] as String?,
-      ahora: ClimaHora.fromJson(json['ahora'] as Map<String, dynamic>),
-      pronostico: (json['pronostico'] as List<dynamic>).map((e) => ClimaHora.fromJson(e as Map<String, dynamic>)).toList(),
-      eventos: (json['eventos'] as List<dynamic>? ?? []).map((e) => ClimaEvento.fromJson(e as Map<String, dynamic>)).toList(),
+      fincaNombre: jsonTextoOpt(jsonMapa(json['finca'])['nombre']),
+      ahora: ClimaHora.fromJson(jsonMapa(json['ahora'])),
+      pronostico: jsonLista(json['pronostico']).map(ClimaHora.fromJson).toList(),
+      eventos: jsonLista(json['eventos']).map(ClimaEvento.fromJson).toList(),
     );
   }
 }
@@ -359,21 +346,15 @@ class RegistroManual {
   });
 
   factory RegistroManual.fromJson(Map<String, dynamic> json) {
-    double? parseNum(dynamic v) {
-      if (v == null) return null;
-      if (v is num) return v.toDouble();
-      return double.tryParse(v.toString());
-    }
-
     return RegistroManual(
-      id: json['id'] as int,
-      parcelaId: json['parcela_id'] as int,
-      usuarioId: json['usuario_id'] as int,
-      usuarioNombre: json['usuario_nombre'] as String?,
-      humedadSuelo: parseNum(json['humedad_suelo']),
-      temperatura: parseNum(json['temperatura']),
-      anotaciones: json['anotaciones'] as String?,
-      fecha: DateTime.tryParse(json['fecha'].toString()) ?? DateTime.now(),
+      id: jsonEntero(json['id']),
+      parcelaId: jsonEntero(json['parcela_id']),
+      usuarioId: jsonEntero(json['usuario_id']),
+      usuarioNombre: jsonTextoOpt(json['usuario_nombre']),
+      humedadSuelo: jsonDecimalOpt(json['humedad_suelo']),
+      temperatura: jsonDecimalOpt(json['temperatura']),
+      anotaciones: jsonTextoOpt(json['anotaciones']),
+      fecha: jsonFecha(json['fecha']) ?? DateTime.now(),
     );
   }
 }
@@ -402,14 +383,14 @@ class Usuario {
 
   factory Usuario.fromJson(Map<String, dynamic> json) {
     return Usuario(
-      id: json['id'] as int,
-      nombre: json['nombre'] as String,
-      email: json['email'] as String,
-      rol: json['rol'] as String,
-      fotoUrl: json['foto_url'] as String?,
-      creadoEn: json['creado_en'] != null ? DateTime.tryParse(json['creado_en']) : null,
-      bloqueado: json['bloqueado'] == true,
-      segundosBloqueo: (json['segundos_bloqueo'] as num?)?.toInt() ?? 0,
+      id: jsonEntero(json['id']),
+      nombre: jsonTexto(json['nombre']),
+      email: jsonTexto(json['email']),
+      rol: jsonTexto(json['rol'], 'agricultor'),
+      fotoUrl: jsonTextoOpt(json['foto_url']),
+      creadoEn: jsonFecha(json['creado_en']),
+      bloqueado: jsonBool(json['bloqueado']),
+      segundosBloqueo: jsonEntero(json['segundos_bloqueo']),
     );
   }
 }
@@ -432,10 +413,10 @@ class ParcelaResumen {
 
   factory ParcelaResumen.fromJson(Map<String, dynamic> json) {
     return ParcelaResumen(
-      id: json['id'] as int,
-      nombre: json['nombre'] as String,
-      fincaId: json['finca_id'] as int,
-      fincaNombre: json['finca_nombre'] as String,
+      id: jsonEntero(json['id']),
+      nombre: jsonTexto(json['nombre']),
+      fincaId: jsonEntero(json['finca_id']),
+      fincaNombre: jsonTexto(json['finca_nombre']),
     );
   }
 }
@@ -455,45 +436,74 @@ class Asignacion {
 
   factory Asignacion.fromJson(Map<String, dynamic> json) {
     return Asignacion(
-      usuarioId: json['usuario_id'] as int,
-      parcelaId: json['parcela_id'] as int,
-      parcelaNombre: json['parcela_nombre'] as String,
-      fincaNombre: json['finca_nombre'] as String,
+      usuarioId: jsonEntero(json['usuario_id']),
+      parcelaId: jsonEntero(json['parcela_id']),
+      parcelaNombre: jsonTexto(json['parcela_nombre']),
+      fincaNombre: jsonTexto(json['finca_nombre']),
     );
   }
 }
 
+/// Token de un solo uso para vincular un sensor a una parcela
+/// (POST/GET /api/sensores/tokens de fincas-service).
 class SensorToken {
   final int id;
   final String token;
+
+  /// Estado guardado en la base: pendiente, usado o expirado.
   final String estado;
-  final DateTime creadoEn;
-  final DateTime expiraEn;
+  final DateTime? creadoEn;
+  final DateTime? expiraEn;
   final DateTime? usadoEn;
-  final String parcelaNombre;
-  final String fincaNombre;
+  final int? parcelaId;
+  final String? parcelaNombre;
+  final String? fincaNombre;
 
   SensorToken({
     required this.id,
     required this.token,
-    required this.estado,
-    required this.creadoEn,
-    required this.expiraEn,
+    this.estado = 'pendiente',
+    this.creadoEn,
+    this.expiraEn,
     this.usadoEn,
-    required this.parcelaNombre,
-    required this.fincaNombre,
+    this.parcelaId,
+    this.parcelaNombre,
+    this.fincaNombre,
   });
 
+  /// Pendiente y sin vencer. La base solo pasa a "expirado" los vencidos
+  /// cuando alguien lista los tokens, así que aquí se mira también la hora.
+  bool get vigente => estado == 'pendiente' && (expiraEn == null || expiraEn!.isAfter(DateTime.now()));
+
+  /// Lo que se muestra: vigente, usado o expirado.
+  String get estadoTexto {
+    if (estado == 'usado') return 'usado';
+    return vigente ? 'vigente' : 'expirado';
+  }
+
+  /// "Finca · Parcela", con lo que haya llegado.
+  String get ubicacion {
+    final partes = [fincaNombre, parcelaNombre].whereType<String>().where((p) => p.isNotEmpty);
+    if (partes.isNotEmpty) return partes.join(' · ');
+    return parcelaId != null ? 'Parcela #$parcelaId' : 'Parcela sin nombre';
+  }
+
+  /// Los primeros caracteres, para identificarlo en la lista sin mostrarlo entero.
+  String get tokenCorto => token.length > 8 ? '${token.substring(0, 8)}…' : token;
+
   factory SensorToken.fromJson(Map<String, dynamic> json) {
+    // Los TIMESTAMP llegan en UTC (ISO): se muestran en la hora del teléfono
+    DateTime? fecha(dynamic v) => jsonFecha(v)?.toLocal();
     return SensorToken(
-      id: json['id'] as int,
-      token: json['token'] as String,
-      estado: json['estado'] as String,
-      creadoEn: DateTime.tryParse(json['creado_en'].toString()) ?? DateTime.now(),
-      expiraEn: DateTime.tryParse(json['expira_en'].toString()) ?? DateTime.now(),
-      usadoEn: json['usado_en'] != null ? DateTime.tryParse(json['usado_en']) : null,
-      parcelaNombre: json['parcela_nombre'] as String,
-      fincaNombre: json['finca_nombre'] as String,
+      id: jsonEntero(json['id']),
+      token: jsonTexto(json['token']),
+      estado: jsonTexto(json['estado'], 'pendiente'),
+      creadoEn: fecha(json['creado_en']),
+      expiraEn: fecha(json['expira_en']),
+      usadoEn: fecha(json['usado_en']),
+      parcelaId: jsonEnteroOpt(json['parcela_id']),
+      parcelaNombre: jsonTextoOpt(json['parcela_nombre']),
+      fincaNombre: jsonTextoOpt(json['finca_nombre']),
     );
   }
 }
@@ -520,19 +530,13 @@ class DashboardResumen {
   });
 
   factory DashboardResumen.fromJson(Map<String, dynamic> json) {
-    double? parseNum(dynamic v) {
-      if (v == null) return null;
-      if (v is num) return v.toDouble();
-      return double.tryParse(v.toString());
-    }
-
     return DashboardResumen(
-      estacionesActivas: (json['estaciones_activas'] as num?)?.toInt() ?? 0,
-      alertasHoy: (json['alertas_hoy'] as num?)?.toInt() ?? 0,
-      humedadPromedio: parseNum(json['humedad_promedio']),
-      temperaturaPromedio: parseNum(json['temperatura_promedio']),
-      cultivosActivos: (json['cultivos_activos'] as num?)?.toInt() ?? 0,
-      riegosEnCurso: (json['riegos_en_curso'] as num?)?.toInt() ?? 0,
+      estacionesActivas: jsonEntero(json['estaciones_activas']),
+      alertasHoy: jsonEntero(json['alertas_hoy']),
+      humedadPromedio: jsonDecimalOpt(json['humedad_promedio']),
+      temperaturaPromedio: jsonDecimalOpt(json['temperatura_promedio']),
+      cultivosActivos: jsonEntero(json['cultivos_activos']),
+      riegosEnCurso: jsonEntero(json['riegos_en_curso']),
     );
   }
 }
@@ -578,29 +582,26 @@ class Cultivo {
   String get estadoTexto => estados[estado] ?? estado;
 
   factory Cultivo.fromJson(Map<String, dynamic> json) {
-    final cantidad = json['cantidad'];
     return Cultivo(
-      id: json['id'] as int,
-      parcelaId: json['parcela_id'] as int,
-      parcelaNombre: json['parcela_nombre'] as String?,
-      fincaNombre: json['finca_nombre'] as String?,
-      tipo: json['tipo'] as String,
-      variedad: json['variedad'] as String?,
-      fechaSiembra: DateTime.tryParse(json['fecha_siembra'].toString()) ?? DateTime.now(),
-      fechaCosechaEstimada: json['fecha_cosecha_estimada'] != null
-          ? DateTime.tryParse(json['fecha_cosecha_estimada'].toString())
-          : null,
-      cantidad: cantidad is num ? cantidad.toDouble() : double.tryParse(cantidad.toString()) ?? 0,
-      unidad: json['unidad'] as String? ?? 'plantas',
-      estado: json['estado'] as String? ?? 'sembrado',
-      notas: json['notas'] as String?,
+      id: jsonEntero(json['id']),
+      parcelaId: jsonEntero(json['parcela_id']),
+      parcelaNombre: jsonTextoOpt(json['parcela_nombre']),
+      fincaNombre: jsonTextoOpt(json['finca_nombre']),
+      tipo: jsonTexto(json['tipo']),
+      variedad: jsonTextoOpt(json['variedad']),
+      fechaSiembra: jsonFecha(json['fecha_siembra']) ?? DateTime.now(),
+      fechaCosechaEstimada: jsonFecha(json['fecha_cosecha_estimada']),
+      cantidad: jsonDecimal(json['cantidad']),
+      unidad: jsonTexto(json['unidad'], 'plantas'),
+      estado: jsonTexto(json['estado'], 'sembrado'),
+      notas: jsonTextoOpt(json['notas']),
     );
   }
 }
 
 /// Las horas de riego vienen "de pared" en el reloj del motor de riego
 /// (el simulado durante la demo), como texto "YYYY-MM-DD HH:MM[:SS]".
-DateTime? _fechaRiego(dynamic v) => v == null ? null : DateTime.tryParse(v.toString());
+DateTime? _fechaRiego(dynamic v) => jsonFecha(v);
 
 /// Un riego de la bitácora (en curso, completado o detenido).
 class RiegoEvento {
@@ -638,16 +639,16 @@ class RiegoEvento {
 
   factory RiegoEvento.fromJson(Map<String, dynamic> json) {
     return RiegoEvento(
-      id: json['id'] as int,
-      parcelaId: json['parcela_id'] as int,
-      origen: json['origen'] as String,
-      programacionNombre: json['programacion_nombre'] as String?,
+      id: jsonEntero(json['id']),
+      parcelaId: jsonEntero(json['parcela_id']),
+      origen: jsonTexto(json['origen']),
+      programacionNombre: jsonTextoOpt(json['programacion_nombre']),
       inicio: _fechaRiego(json['inicio']) ?? DateTime.now(),
       fin: _fechaRiego(json['fin']),
       finPrevisto: _fechaRiego(json['fin_previsto']),
-      duracionMinutos: (json['duracion_minutos'] as num).toInt(),
-      estado: json['estado'] as String,
-      motivo: json['motivo'] as String?,
+      duracionMinutos: jsonEntero(json['duracion_minutos']),
+      estado: jsonTexto(json['estado']),
+      motivo: jsonTextoOpt(json['motivo']),
     );
   }
 }
@@ -673,12 +674,12 @@ class RiegoProgramacion {
 
   factory RiegoProgramacion.fromJson(Map<String, dynamic> json) {
     return RiegoProgramacion(
-      id: json['id'] as int,
-      nombre: json['nombre'] as String,
-      dias: (json['dias_semana'] as String).split(','),
-      horaInicio: json['hora_inicio'] as String,
-      duracionMinutos: (json['duracion_minutos'] as num).toInt(),
-      activa: json['activa'] == true || json['activa'] == 1,
+      id: jsonEntero(json['id']),
+      nombre: jsonTexto(json['nombre']),
+      dias: jsonTexto(json['dias_semana']).split(',').where((d) => d.isNotEmpty).toList(),
+      horaInicio: jsonTexto(json['hora_inicio']),
+      duracionMinutos: jsonEntero(json['duracion_minutos']),
+      activa: jsonBool(json['activa']),
       proximaEjecucion: _fechaRiego(json['proxima_ejecucion']),
     );
   }
@@ -704,16 +705,10 @@ class RiegoResumen {
 
   factory RiegoResumen.fromJson(Map<String, dynamic> json) {
     return RiegoResumen(
-      riegoAutomatico: json['riego_automatico'] == true,
-      riegoEnCurso: json['riego_en_curso'] != null
-          ? RiegoEvento.fromJson(json['riego_en_curso'] as Map<String, dynamic>)
-          : null,
-      programaciones: (json['programaciones'] as List<dynamic>)
-          .map((e) => RiegoProgramacion.fromJson(e as Map<String, dynamic>))
-          .toList(),
-      ultimosRiegos: (json['ultimos_riegos'] as List<dynamic>)
-          .map((e) => RiegoEvento.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      riegoAutomatico: jsonBool(json['riego_automatico']),
+      riegoEnCurso: json['riego_en_curso'] is Map ? RiegoEvento.fromJson(jsonMapa(json['riego_en_curso'])) : null,
+      programaciones: jsonLista(json['programaciones']).map(RiegoProgramacion.fromJson).toList(),
+      ultimosRiegos: jsonLista(json['ultimos_riegos']).map(RiegoEvento.fromJson).toList(),
       reloj: _fechaRiego(json['reloj']),
     );
   }
@@ -729,11 +724,10 @@ class HistorialPunto {
   HistorialPunto({required this.finca, required this.dia, required this.humedad});
 
   factory HistorialPunto.fromJson(Map<String, dynamic> json) {
-    final humedad = json['humedad'];
     return HistorialPunto(
-      finca: json['finca'] as String,
-      dia: DateTime.tryParse(json['dia'].toString()) ?? DateTime.now(),
-      humedad: humedad is num ? humedad.toDouble() : double.tryParse(humedad.toString()) ?? 0,
+      finca: jsonTexto(json['finca']),
+      dia: jsonFecha(json['dia']) ?? DateTime.now(),
+      humedad: jsonDecimal(json['humedad']),
     );
   }
 }

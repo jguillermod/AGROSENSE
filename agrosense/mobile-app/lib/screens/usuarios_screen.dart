@@ -25,7 +25,9 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
   void initState() {
     super.initState();
     _future = _cargar();
-    _authService.getUsuarioId().then((id) => setState(() => _miId = id));
+    _authService.getUsuarioId().then((id) {
+      if (mounted) setState(() => _miId = id);
+    });
   }
 
   Future<_UsuariosData> _cargar() async {
@@ -42,7 +44,9 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
   }
 
   Future<void> _refrescar() async {
-    setState(() => _future = _cargar());
+    setState(() {
+      _future = _cargar();
+    });
     await _future;
   }
 

@@ -121,7 +121,13 @@ class _SensoresScreenState extends State<SensoresScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Válido por 30 minutos y de un solo uso.'),
+              Text(token.ubicacion, style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              Text(
+                token.expiraEn != null
+                    ? 'De un solo uso. Vence a las ${DateFormat('HH:mm').format(token.expiraEn!)}.'
+                    : 'Válido por 30 minutos y de un solo uso.',
+              ),
               const SizedBox(height: 12),
               SelectableText(
                 token.token,
@@ -150,7 +156,7 @@ class _SensoresScreenState extends State<SensoresScreen> {
     final confirmado = await confirmarAccion(
       context,
       titulo: 'Revocar token',
-      mensaje: '¿Revocar el token de ${token.fincaNombre} · ${token.parcelaNombre}?',
+      mensaje: '¿Revocar el token de ${token.ubicacion}?',
       textoConfirmar: 'Revocar',
     );
     if (!confirmado) return;
@@ -314,29 +320,32 @@ class _SensoresScreenState extends State<SensoresScreen> {
                         }
                         return Column(
                           children: tokens.map((t) {
-                            final badgeColor = switch (t.estado) {
-                              'pendiente' => AppTheme.warning,
+                            final badgeColor = switch (t.estadoTexto) {
+                              'vigente' => AppTheme.warning,
                               'usado' => AppTheme.primaryGreen,
                               _ => AppTheme.neutralText,
                             };
+                            final expira = t.expiraEn != null
+                                ? 'expira ${DateFormat('dd/MM HH:mm').format(t.expiraEn!)}'
+                                : 'sin fecha de expiración';
                             return Card(
                               margin: const EdgeInsets.only(bottom: 8),
                               child: ListTile(
                                 title: Text(
-                                  '${t.fincaNombre} · ${t.parcelaNombre}',
+                                  t.ubicacion,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 subtitle: Text(
-                                  '${t.token.substring(0, 8)}… · expira ${DateFormat('dd/MM HH:mm').format(t.expiraEn)}',
+                                  '${t.tokenCorto} · $expira',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    EstadoBadge(texto: t.estado, color: badgeColor),
-                                    if (t.estado == 'pendiente')
+                                    EstadoBadge(texto: t.estadoTexto, color: badgeColor),
+                                    if (t.vigente)
                                       IconButton(
                                         icon: const Icon(Icons.close, color: AppTheme.danger),
                                         onPressed: () => _revocarToken(t),

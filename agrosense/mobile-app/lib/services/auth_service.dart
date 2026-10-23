@@ -5,6 +5,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
+import '../models/json.dart';
 import '../models/models.dart';
 import 'api_client.dart';
 import 'api_exception.dart';
@@ -50,21 +51,27 @@ class AuthService {
         body: jsonEncode({'email': email, 'password': password}),
       );
 
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final data = jsonMapa(jsonDecode(res.body));
       // 401 credenciales inválidas, 423 cuenta bloqueada (el mensaje trae el
       // tiempo restante). Va con http directo, no con ApiClient: un login
       // fallido nunca cierra la sesión guardada.
       if (res.statusCode != 200) {
-        return AuthResult.failure(data['error'] as String? ?? 'Credenciales inválidas');
+        return AuthResult.failure(jsonTextoOpt(data['error']) ?? 'Credenciales inválidas');
       }
 
-      final usuario = data['usuario'] as Map<String, dynamic>;
+      // sin token o sin id no hay sesión que guardar
+      final usuario = jsonMapa(data['usuario']);
+      final token = jsonTextoOpt(data['token']);
+      final usuarioId = jsonEnteroOpt(usuario['id']);
+      if (token == null || token.isEmpty || usuarioId == null) {
+        return AuthResult.failure('Respuesta inesperada del servidor');
+      }
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_keyToken, data['token'] as String);
-      await prefs.setInt(_keyUsuarioId, usuario['id'] as int);
-      await prefs.setString(_keyUsuarioNombre, usuario['nombre'] as String? ?? '');
-      await prefs.setString(_keyUsuarioRol, usuario['rol'] as String? ?? '');
-      await prefs.setString(_keyUsuarioFoto, usuario['foto_url'] as String? ?? '');
+      await prefs.setString(_keyToken, token);
+      await prefs.setInt(_keyUsuarioId, usuarioId);
+      await prefs.setString(_keyUsuarioNombre, jsonTexto(usuario['nombre']));
+      await prefs.setString(_keyUsuarioRol, jsonTexto(usuario['rol']));
+      await prefs.setString(_keyUsuarioFoto, jsonTexto(usuario['foto_url']));
 
       return AuthResult.success();
     } catch (e) {
@@ -88,8 +95,8 @@ class AuthService {
       );
 
       if (res.statusCode != 201) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        return AuthResult.failure(data['error'] as String? ?? 'No se pudo completar el registro');
+        final data = jsonMapa(jsonDecode(res.body));
+        return AuthResult.failure(jsonTextoOpt(data['error']) ?? 'No se pudo completar el registro');
       }
       return AuthResult.success();
     } catch (e) {
@@ -106,8 +113,11 @@ class AuthService {
           body: jsonEncode({'email': email}),
         ));
     _checkOk(res, 'No se pudo solicitar la recuperación');
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return SolicitudRecuperacion(mensaje: data['mensaje'] as String, devToken: data['dev_token'] as String?);
+    final data = jsonMapa(jsonDecode(res.body));
+    return SolicitudRecuperacion(
+      mensaje: jsonTexto(data['mensaje'], 'Si el correo está registrado, te enviamos un código para restablecer tu contraseña.'),
+      devToken: jsonTextoOpt(data['dev_token']),
+    );
   }
 
   /// [codigo] es el token de un solo uso (el mismo del enlace de la web).
@@ -174,14 +184,13 @@ class AuthService {
   Future<List<Usuario>> getUsuarios() async {
     final res = await ApiClient.get(Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios'));
     _checkOk(res, 'No se pudieron cargar los usuarios');
-    final List<dynamic> data = jsonDecode(res.body);
-    return data.map((e) => Usuario.fromJson(e as Map<String, dynamic>)).toList();
+    return jsonLista(jsonDecode(res.body)).map(Usuario.fromJson).toList();
   }
 
   Future<Usuario> getUsuario(int id) async {
     final res = await ApiClient.get(Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios/$id'));
     _checkOk(res, 'No se pudo cargar el usuario');
-    return Usuario.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    return Usuario.fromJson(jsonMapa(jsonDecode(res.body)));
   }
 
   /// A diferencia de [register], permite elegir el rol: la usa la
@@ -204,8 +213,7 @@ class AuthService {
     if (res.statusCode != 201) {
       throw ApiException.fromResponseBody(res.body, 'No se pudo crear el usuario');
     }
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return data['id'] as int;
+    return ApiException.idCreado(res.body);
   }
 
   Future<void> editarUsuario(
@@ -282,8 +290,7 @@ class AuthService {
     final res = await ApiClient.send(request);
 
     _checkOk(res, 'No se pudo actualizar la foto');
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    final fotoUrl = data['foto_url'] as String?;
+    final fotoUrl = jsonTextoOpt(jsonMapa(jsonDecode(res.body))['foto_url']);
     await _guardarFotoCache(fotoUrl);
     return fotoUrl ?? '';
   }

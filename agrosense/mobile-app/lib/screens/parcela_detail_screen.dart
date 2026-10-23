@@ -47,7 +47,10 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
       MaterialPageRoute(builder: (_) => CultivosScreen(parcela: widget.parcela)),
     );
     // al volver, el resumen refleja lo que se haya agregado/editado
-    if (mounted) setState(() => _cultivosFuture = _cargarCultivos());
+    if (!mounted) return;
+    setState(() {
+      _cultivosFuture = _cargarCultivos();
+    });
   }
 
   Future<void> _agregarRegistro() async {
@@ -151,8 +154,11 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
         temperatura: double.tryParse(temperaturaController.text.trim()),
         anotaciones: anotacionesController.text.trim().isEmpty ? null : anotacionesController.text.trim(),
       );
-      if (mounted) mostrarExito(context, 'Registro guardado');
-      setState(() => _registrosFuture = _dataService.getRegistros(parcela.id));
+      if (!mounted) return;
+      mostrarExito(context, 'Registro guardado');
+      setState(() {
+        _registrosFuture = _dataService.getRegistros(parcela.id);
+      });
     } catch (e) {
       if (mounted) mostrarError(context, e);
     }

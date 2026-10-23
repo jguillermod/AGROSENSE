@@ -47,7 +47,9 @@ class _AlertasScreenState extends State<AlertasScreen> {
   }
 
   Future<void> _refrescar() async {
-    setState(() => _future = _cargar());
+    setState(() {
+      _future = _cargar();
+    });
     await _future;
   }
 

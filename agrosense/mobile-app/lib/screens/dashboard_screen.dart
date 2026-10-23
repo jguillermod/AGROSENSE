@@ -63,7 +63,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _refrescar() async {
-    setState(() => _future = _cargar());
+    setState(() {
+      _future = _cargar();
+    });
     await _future;
   }
 

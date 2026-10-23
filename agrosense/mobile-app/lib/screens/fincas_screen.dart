@@ -26,7 +26,9 @@ class _FincasScreenState extends State<FincasScreen> {
   }
 
   Future<void> _refrescar() async {
-    setState(() => _fincasFuture = _dataService.getFincas());
+    setState(() {
+      _fincasFuture = _dataService.getFincas();
+    });
     await _fincasFuture;
   }
 

@@ -43,7 +43,9 @@ class _MisParcelasScreenState extends State<MisParcelasScreen> {
   }
 
   Future<void> _refrescar() async {
-    setState(() => _parcelasFuture = _cargar());
+    setState(() {
+      _parcelasFuture = _cargar();
+    });
     await _parcelasFuture;
   }
 

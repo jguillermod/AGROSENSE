@@ -276,30 +276,39 @@ class _DuracionDialogState extends State<_DuracionDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Regar ahora'),
-      content: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              controller: _controller,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Duración (minutos)'),
-              validator: (v) {
-                final n = int.tryParse((v ?? '').trim());
-                if (n == null || n < 1 || n > 720) return 'Entre 1 y 720 minutos';
-                return null;
-              },
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [15, 30, 60]
-                  .map((m) => ActionChip(label: Text('$m min'), onPressed: () => _controller.text = '$m'))
-                  .toList(),
-            ),
-          ],
+      // Con el teclado abierto queda poco alto: el contenido se desplaza en vez de desbordar
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _controller,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Duración (minutos)'),
+                validator: (v) {
+                  final n = int.tryParse((v ?? '').trim());
+                  if (n == null || n < 1 || n > 720) return 'Entre 1 y 720 minutos';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [15, 30, 60]
+                    .map((m) => ActionChip(
+                          label: Text('$m min'),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          onPressed: () => _controller.text = '$m',
+                        ))
+                    .toList(),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [

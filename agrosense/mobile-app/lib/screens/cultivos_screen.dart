@@ -50,7 +50,9 @@ class _CultivosScreenState extends State<CultivosScreen> {
   }
 
   Future<void> _refrescar() async {
-    setState(() => _cultivosFuture = _cargar());
+    setState(() {
+      _cultivosFuture = _cargar();
+    });
     await _cultivosFuture;
   }
 

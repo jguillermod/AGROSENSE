@@ -65,7 +65,9 @@ class _ParcelasScreenState extends State<ParcelasScreen> {
 
   Future<void> _refrescarParcelas() async {
     if (_fincaActiva == null) return;
-    setState(() => _parcelasFuture = _dataService.getParcelas(_fincaActiva!.id));
+    setState(() {
+      _parcelasFuture = _dataService.getParcelas(_fincaActiva!.id);
+    });
     await _parcelasFuture;
   }
 
