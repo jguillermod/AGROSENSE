@@ -11,6 +11,9 @@ const { AsyncLocalStorage } = require("async_hooks");
 const app = express();
 app.set("view engine", "ejs");
 app.set("views", __dirname + "/../views");
+// Mínimo de contraseña (el mismo que valida auth-service): las vistas lo usan
+// en minlength y en los textos de ayuda; public/js/password-minimo.js pone el mensaje.
+app.locals.passwordMin = 8;
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(__dirname + "/../public"));
 app.use(cookieParser());
@@ -206,7 +209,6 @@ app.post("/login", async (req, res) => {
 });
 
 // --- Recuperación de contraseña (pública; la lógica vive en auth-service) ---
-const RESET_PASSWORD_MIN = 8;
 
 app.get("/olvide", (req, res) => {
   res.render("olvide", { error: null, mensaje: null, devEnlace: null, email: "" });
@@ -226,7 +228,7 @@ app.post("/olvide", async (req, res) => {
 
 function renderRestablecer(res, token, error = null) {
   res.set("Cache-Control", "no-store");
-  res.render("restablecer", { token, error, minimo: RESET_PASSWORD_MIN });
+  res.render("restablecer", { token, error });
 }
 
 app.get("/restablecer", (req, res) => renderRestablecer(res, String(req.query.token || "")));

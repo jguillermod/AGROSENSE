@@ -67,7 +67,7 @@ void main() {
       await _escribir(tester, 'Repite la contraseña', 'corta');
       await tester.tap(find.text('Guardar contraseña'));
       await tester.pumpAndSettle();
-      expect(find.text('Debe tener al menos 8 caracteres'), findsOneWidget);
+      expect(find.text('La contraseña debe tener al menos 8 caracteres.'), findsOneWidget);
       expect(cuerpos.containsKey('/api/auth/restablecer'), isFalse);
 
       await _escribir(tester, 'Contraseña nueva', 'nueva-segura-1');

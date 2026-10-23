@@ -23,7 +23,6 @@ class RecuperarPasswordScreen extends StatefulWidget {
 enum _Paso { correo, codigo, listo }
 
 class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
-  static const _minimoPassword = 8;
 
   final _authService = AuthService();
   final _formCorreo = GlobalKey<FormState>();
@@ -195,10 +194,10 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
             controller: _passwordController,
             decoration: const InputDecoration(
               labelText: 'Contraseña nueva',
-              helperText: 'Mínimo $_minimoPassword caracteres',
+              helperText: ayudaPasswordMinimo,
               prefixIcon: Icon(Icons.lock_outline),
             ),
-            validator: (v) => validarPassword(v, minLength: _minimoPassword),
+            validator: validarPassword,
           ),
           const SizedBox(height: 16),
           CampoPassword(

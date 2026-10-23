@@ -12,7 +12,6 @@ app.use(cors());
 app.use(express.json());
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PASSWORD_MIN_LENGTH = 6;
 
 // Salud del servicio (útil para healthchecks/monitoreo)
 app.get("/health", (req, res) => {
@@ -47,8 +46,8 @@ app.post("/api/auth/register", registroPublicoOAdmin, async (req, res) => {
     if (!EMAIL_REGEX.test(email)) {
       return res.status(400).json({ error: "El correo no tiene un formato válido" });
     }
-    if (password.length < PASSWORD_MIN_LENGTH) {
-      return res.status(400).json({ error: `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres` });
+    if (seguridad.passwordCorta(password)) {
+      return res.status(400).json({ error: seguridad.MENSAJE_PASSWORD_CORTA });
     }
 
     const hash = await bcrypt.hash(password, 10);
@@ -206,8 +205,8 @@ app.put("/api/auth/usuarios/:id", soloAdmin, async (req, res) => {
     if (!EMAIL_REGEX.test(email)) {
       return res.status(400).json({ error: "El correo no tiene un formato válido" });
     }
-    if (password && password.length < PASSWORD_MIN_LENGTH) {
-      return res.status(400).json({ error: `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres` });
+    if (password && seguridad.passwordCorta(password)) {
+      return res.status(400).json({ error: seguridad.MENSAJE_PASSWORD_CORTA });
     }
 
     if (password) {
@@ -245,8 +244,8 @@ app.put("/api/auth/usuarios/:id/perfil", soloPropioUsuario, async (req, res) => 
     if (email && !EMAIL_REGEX.test(email)) {
       return res.status(400).json({ error: "El correo no tiene un formato válido" });
     }
-    if (password_nueva && password_nueva.length < PASSWORD_MIN_LENGTH) {
-      return res.status(400).json({ error: `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres` });
+    if (password_nueva && seguridad.passwordCorta(password_nueva)) {
+      return res.status(400).json({ error: seguridad.MENSAJE_PASSWORD_CORTA });
     }
 
     const [rows] = await pool.query("SELECT * FROM usuarios WHERE id = ?", [req.params.id]);

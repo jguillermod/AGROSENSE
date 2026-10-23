@@ -11,7 +11,10 @@ const pool = require("./db");
 const MAX_INTENTOS = 5;
 const BLOQUEO_MINUTOS = 15;
 const RESET_MINUTOS = 30;
-const RESET_PASSWORD_MIN = 8;
+// Mínimo de contraseña para registro, alta/edición de usuarios, perfil y
+// recuperación. La web y la app usan el mismo número y el mismo mensaje.
+const PASSWORD_MIN = 8;
+const MENSAJE_PASSWORD_CORTA = `La contraseña debe tener al menos ${PASSWORD_MIN} caracteres.`;
 // Simulación: no se envía correo. El enlace siempre se escribe en los logs y
 // solo se devuelve al cliente (para mostrarlo en pantalla) si esto es true.
 const MOSTRAR_TOKEN = process.env.DEV_SHOW_RESET_TOKEN === "true";
@@ -20,6 +23,9 @@ const WEB_URL = (process.env.WEB_PUBLIC_URL || "http://localhost:8080").replace(
 const MENSAJE_SOLICITUD =
   `Si el correo está registrado, te enviamos un enlace para restablecer tu contraseña. ` +
   `Vence en ${RESET_MINUTOS} minutos.`;
+
+// true si la contraseña no cumple el mínimo (o no es texto)
+const passwordCorta = (password) => typeof password !== "string" || password.length < PASSWORD_MIN;
 
 const sha256 = (valor) => crypto.createHash("sha256").update(valor).digest("hex");
 
@@ -102,9 +108,7 @@ async function solicitarRecuperacion(email) {
 // Cambia la contraseña con un token válido y lo deja usado. Devuelve
 // { error, status } si el token no sirve o la contraseña no cumple.
 async function confirmarRecuperacion(token, password) {
-  if (typeof password !== "string" || password.length < RESET_PASSWORD_MIN) {
-    return { status: 400, error: `La contraseña debe tener al menos ${RESET_PASSWORD_MIN} caracteres` };
-  }
+  if (passwordCorta(password)) return { status: 400, error: MENSAJE_PASSWORD_CORTA };
   if (typeof token !== "string" || !token) return { status: 400, error: "Falta el código de recuperación" };
 
   const hashNuevo = await bcrypt.hash(password, 10);
@@ -147,6 +151,8 @@ module.exports = {
   MAX_INTENTOS,
   MENSAJE_SOLICITUD,
   MOSTRAR_TOKEN,
+  MENSAJE_PASSWORD_CORTA,
+  passwordCorta,
   SQL_SEGUNDOS_BLOQUEO,
   responderBloqueo,
   registrarFallo,

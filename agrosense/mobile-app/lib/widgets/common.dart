@@ -56,10 +56,16 @@ String? validarEmail(String? valor) {
   return null;
 }
 
+/// Mínimo de contraseña: el mismo que valida auth-service (y la web), con
+/// el mismo mensaje, en registro, usuarios, perfil y recuperación.
+const passwordMinimo = 8;
+const mensajePasswordCorta = 'La contraseña debe tener al menos $passwordMinimo caracteres.';
+const ayudaPasswordMinimo = 'Mínimo $passwordMinimo caracteres';
+
 /// Validador de contraseña reutilizable (mínimo de caracteres).
-String? validarPassword(String? valor, {int minLength = 6}) {
+String? validarPassword(String? valor) {
   if (valor == null || valor.isEmpty) return 'Ingresa una contraseña';
-  if (valor.length < minLength) return 'Debe tener al menos $minLength caracteres';
+  if (valor.length < passwordMinimo) return mensajePasswordCorta;
   return null;
 }
 

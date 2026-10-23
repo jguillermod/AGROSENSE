@@ -99,12 +99,8 @@ class _PerfilScreenState extends State<PerfilScreen> {
         const SizedBox(height: 12),
         CampoPassword(
           controller: nuevaController,
-          decoration: const InputDecoration(labelText: 'Nueva contraseña'),
-          validator: (v) {
-            if (v == null || v.isEmpty) return 'Ingresa una nueva contraseña';
-            if (v.length < 6) return 'Debe tener al menos 6 caracteres';
-            return null;
-          },
+          decoration: const InputDecoration(labelText: 'Nueva contraseña', helperText: ayudaPasswordMinimo),
+          validator: (v) => (v == null || v.isEmpty) ? 'Ingresa una nueva contraseña' : validarPassword(v),
         ),
         const SizedBox(height: 12),
         CampoPassword(

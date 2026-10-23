@@ -147,6 +147,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             controller: _passwordController,
             decoration: const InputDecoration(
               labelText: 'Contraseña',
+              helperText: ayudaPasswordMinimo,
               prefixIcon: Icon(Icons.lock_outline),
             ),
             validator: validarPassword,

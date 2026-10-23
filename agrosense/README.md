@@ -191,6 +191,14 @@ nunca de un `usuario_id` que mande el cliente.
 - Crear o eliminar parcelas y editar o eliminar una finca: su dueño o el admin. Asignar parcelas a otros
   usuarios: solo admin (un usuario solo puede auto-asignarse parcelas de sus propias fincas).
 
+### Largo mínimo de contraseña
+
+Toda contraseña nueva debe tener **al menos 8 caracteres**: registro, alta y edición de usuarios, cambio de
+contraseña en el perfil y recuperación. Lo valida auth-service (`PASSWORD_MIN` en `seguridadLogin.js`), y la
+web (`minlength="8"`) y la app lo revisan antes de enviar, con el mismo mensaje:
+*"La contraseña debe tener al menos 8 caracteres."*. Las cuentas creadas antes con contraseñas más cortas
+siguen iniciando sesión (el login no revisa el largo); el mínimo aplica cuando cambien la contraseña.
+
 ### Bloqueo de cuenta por intentos fallidos
 
 (`services/auth-service/src/seguridadLogin.js`)

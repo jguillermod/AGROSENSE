@@ -93,6 +93,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
                         controller: passwordController,
                         decoration: InputDecoration(
                           labelText: usuario == null ? 'Contraseña' : 'Nueva contraseña (opcional)',
+                          helperText: ayudaPasswordMinimo,
                         ),
                         validator: (v) {
                           // Al crear, la contraseña es obligatoria y con largo

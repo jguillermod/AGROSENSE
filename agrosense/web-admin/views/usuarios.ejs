@@ -91,7 +91,8 @@
         </div>
         <div class="form-field">
           <label for="nuevo-usuario-password">Contraseña</label>
-          <input type="password" name="password" id="nuevo-usuario-password" required>
+          <input type="password" name="password" id="nuevo-usuario-password" minlength="<%= passwordMin %>" required autocomplete="new-password">
+          <p class="form-field-hint">Mínimo <%= passwordMin %> caracteres.</p>
         </div>
         <div class="form-field">
           <label for="nuevo-usuario-rol">Rol</label>
@@ -141,8 +142,8 @@
         </div>
         <div class="form-field">
           <label for="editar-usuario-password">Nueva contraseña</label>
-          <input type="password" name="password" id="editar-usuario-password">
-          <p class="form-field-hint">Déjala en blanco para no cambiarla.</p>
+          <input type="password" name="password" id="editar-usuario-password" minlength="<%= passwordMin %>" autocomplete="new-password">
+          <p class="form-field-hint">Mínimo <%= passwordMin %> caracteres. Déjala en blanco para no cambiarla.</p>
         </div>
         <div class="form-field">
           <label for="editar-usuario-rol">Rol</label>
