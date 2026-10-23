@@ -19,6 +19,10 @@ DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "3306")
 DB_NAME = os.getenv("DB_NAME")
 
+# Archivo de latido: el bucle principal lo actualiza en cada vuelta y el
+# healthcheck de Docker (healthcheck.py) revisa que no esté viejo
+HEARTBEAT_FILE = os.getenv("ETL_HEARTBEAT_FILE", "/tmp/etl_heartbeat")
+
 engine = create_engine(
     f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
@@ -82,6 +86,11 @@ def cargar(df: pd.DataFrame):
     print(f"[ETL] {len(df)} registros de resumen actualizados.")
 
 
+def latido():
+    with open(HEARTBEAT_FILE, "w") as f:
+        f.write(str(int(time.time())))
+
+
 def ejecutar_job():
     print("[ETL] Iniciando corrida...")
     df_crudo = extraer()
@@ -104,4 +113,5 @@ if __name__ == "__main__":
 
     while True:
         schedule.run_pending()
+        latido()
         time.sleep(30)

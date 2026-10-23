@@ -14,6 +14,11 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(__dirname + "/../public"));
 app.use(cookieParser());
 
+// Salud del panel (healthcheck de Docker y Uptime Kuma); no requiere sesión
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", service: "web-admin" });
+});
+
 const AUTH_URL = process.env.AUTH_SERVICE_URL;
 const FINCAS_URL = process.env.FINCAS_SERVICE_URL;
 const LECTURAS_URL = process.env.LECTURAS_SERVICE_URL;

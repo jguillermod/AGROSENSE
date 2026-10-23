@@ -5,6 +5,14 @@ version: "3.9"
 # Apagar:    docker compose down
 # Apagar y borrar datos: docker compose down -v
 
+# Healthcheck común de los servicios Node (node:20-alpine trae el wget de busybox)
+x-node-healthcheck: &node-healthcheck
+  test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health > /dev/null || exit 1"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+
 services:
   mysql:
     image: mariadb:11
@@ -35,11 +43,18 @@ services:
       PMA_HOST: mysql
     ports:
       - "8081:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       - mysql
 
   auth-service:
     build: ./services/auth-service
+    healthcheck: *node-healthcheck
     container_name: agrosense-auth
     restart: unless-stopped
     env_file: .env
@@ -54,6 +69,7 @@ services:
 
   fincas-service:
     build: ./services/fincas-service
+    healthcheck: *node-healthcheck
     container_name: agrosense-fincas
     restart: unless-stopped
     env_file: .env
@@ -68,6 +84,7 @@ services:
 
   lecturas-service:
     build: ./services/lecturas-service
+    healthcheck: *node-healthcheck
     container_name: agrosense-lecturas
     restart: unless-stopped
     env_file: .env
@@ -90,6 +107,14 @@ services:
       ETL_INTERVAL_MINUTES: "5"
       # que los print() del ETL aparezcan al momento en `docker logs`
       PYTHONUNBUFFERED: "1"
+    # python:3.12-slim no trae curl/wget y el ETL no expone HTTP: se revisa el
+    # archivo de latido que el bucle principal actualiza cada 30 s
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       mysql:
         condition: service_healthy
@@ -99,6 +124,7 @@ services:
   # Simula los sensores (ESP32): crea datos demo y envía lecturas periódicas
   simulator-service:
     build: ./services/simulator-service
+    healthcheck: *node-healthcheck
     container_name: agrosense-simulator
     restart: unless-stopped
     env_file: .env
@@ -119,6 +145,7 @@ services:
   # Respaldos de la base (mariadb-dump) en su propio volumen, fuera del repo
   backup-service:
     build: ./services/backup-service
+    healthcheck: *node-healthcheck
     container_name: agrosense-backup
     restart: unless-stopped
     env_file: .env
@@ -134,6 +161,7 @@ services:
 
   web-admin:
     build: ./web-admin
+    healthcheck: *node-healthcheck
     container_name: agrosense-web
     restart: unless-stopped
     env_file: .env
@@ -148,7 +176,19 @@ services:
       - ./web-admin:/app
       - /app/node_modules
 
+  # Monitoreo de salud y página de estado (ver README, sección "Monitoreo con Uptime Kuma")
+  # La imagen ya trae su propio HEALTHCHECK.
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: agrosense-uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "3010:3001"
+    volumes:
+      - uptime_data:/app/data
+
 volumes:
   mysql_data:
   simulator_data:
   backups_data:
+  uptime_data:
