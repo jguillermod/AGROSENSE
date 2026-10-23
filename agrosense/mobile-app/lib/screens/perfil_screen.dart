@@ -69,9 +69,8 @@ class _PerfilScreenState extends State<PerfilScreen> {
           validator: validarEmail,
         ),
         const SizedBox(height: 12),
-        TextFormField(
+        CampoPassword(
           controller: passwordController,
-          obscureText: true,
           decoration: const InputDecoration(labelText: 'Contraseña actual'),
           validator: (v) => (v == null || v.isEmpty) ? 'Confirma tu contraseña actual' : null,
         ),
@@ -92,16 +91,14 @@ class _PerfilScreenState extends State<PerfilScreen> {
     await _abrirFormularioSimple(
       titulo: 'Cambiar contraseña',
       campos: [
-        TextFormField(
+        CampoPassword(
           controller: actualController,
-          obscureText: true,
           decoration: const InputDecoration(labelText: 'Contraseña actual'),
           validator: (v) => (v == null || v.isEmpty) ? 'Ingresa tu contraseña actual' : null,
         ),
         const SizedBox(height: 12),
-        TextFormField(
+        CampoPassword(
           controller: nuevaController,
-          obscureText: true,
           decoration: const InputDecoration(labelText: 'Nueva contraseña'),
           validator: (v) {
             if (v == null || v.isEmpty) return 'Ingresa una nueva contraseña';
@@ -110,9 +107,8 @@ class _PerfilScreenState extends State<PerfilScreen> {
           },
         ),
         const SizedBox(height: 12),
-        TextFormField(
+        CampoPassword(
           controller: confirmarController,
-          obscureText: true,
           decoration: const InputDecoration(labelText: 'Confirmar nueva contraseña'),
           validator: (v) => (v != nuevaController.text) ? 'No coincide con la nueva contraseña' : null,
         ),

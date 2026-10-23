@@ -143,9 +143,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             validator: validarEmail,
           ),
           const SizedBox(height: 16),
-          TextFormField(
+          CampoPassword(
             controller: _passwordController,
-            obscureText: true,
             decoration: const InputDecoration(
               labelText: 'Contraseña',
               prefixIcon: Icon(Icons.lock_outline),

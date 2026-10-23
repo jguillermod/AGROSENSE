@@ -197,3 +197,44 @@ void mostrarExito(BuildContext context, String mensaje) {
     SnackBar(content: Text(mensaje), backgroundColor: AppTheme.primaryGreen),
   );
 }
+
+/// Campo de contraseña con botón de ojo (suffixIcon) para mostrarla u
+/// ocultarla. Empieza oculta. Recibe la misma decoración que un
+/// TextFormField normal; el suffixIcon lo pone este widget.
+class CampoPassword extends StatefulWidget {
+  final TextEditingController? controller;
+  final InputDecoration decoration;
+  final FormFieldValidator<String>? validator;
+
+  const CampoPassword({
+    super.key,
+    this.controller,
+    this.decoration = const InputDecoration(),
+    this.validator,
+  });
+
+  @override
+  State<CampoPassword> createState() => _CampoPasswordState();
+}
+
+class _CampoPasswordState extends State<CampoPassword> {
+  bool _oculta = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: widget.controller,
+      obscureText: _oculta,
+      enableSuggestions: false,
+      autocorrect: false,
+      validator: widget.validator,
+      decoration: widget.decoration.copyWith(
+        suffixIcon: IconButton(
+          icon: Icon(_oculta ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+          tooltip: _oculta ? 'Mostrar contraseña' : 'Ocultar contraseña',
+          onPressed: () => setState(() => _oculta = !_oculta),
+        ),
+      ),
+    );
+  }
+}

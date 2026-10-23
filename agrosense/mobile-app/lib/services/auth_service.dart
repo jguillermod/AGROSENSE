@@ -19,6 +19,16 @@ class AuthResult {
   AuthResult.failure(this.error) : ok = false;
 }
 
+/// Respuesta de "olvidé mi contraseña": [mensaje] es siempre el mismo
+/// (exista o no el correo); [devToken] solo llega si el backend tiene
+/// DEV_SHOW_RESET_TOKEN=true (simulación sin correo).
+class SolicitudRecuperacion {
+  final String mensaje;
+  final String? devToken;
+
+  SolicitudRecuperacion({required this.mensaje, this.devToken});
+}
+
 /// Login/registro/logout y todo lo relacionado al usuario: sesión
 /// guardada en SharedPreferences (equivalente a las cookies del panel
 /// web), gestión de otros usuarios (solo admin) y edición del perfil
@@ -41,6 +51,9 @@ class AuthService {
       );
 
       final data = jsonDecode(res.body) as Map<String, dynamic>;
+      // 401 credenciales inválidas, 423 cuenta bloqueada (el mensaje trae el
+      // tiempo restante). Va con http directo, no con ApiClient: un login
+      // fallido nunca cierra la sesión guardada.
       if (res.statusCode != 200) {
         return AuthResult.failure(data['error'] as String? ?? 'Credenciales inválidas');
       }
@@ -81,6 +94,37 @@ class AuthService {
       return AuthResult.success();
     } catch (e) {
       return AuthResult.failure('No se pudo conectar con el servidor');
+    }
+  }
+
+  // --- Recuperación de contraseña (públicas, sin JWT) ---
+
+  Future<SolicitudRecuperacion> solicitarRecuperacion(String email) async {
+    final res = await _publica(() => http.post(
+          Uri.parse('${ApiConfig.authBaseUrl}/api/auth/recuperar'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'email': email}),
+        ));
+    _checkOk(res, 'No se pudo solicitar la recuperación');
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return SolicitudRecuperacion(mensaje: data['mensaje'] as String, devToken: data['dev_token'] as String?);
+  }
+
+  /// [codigo] es el token de un solo uso (el mismo del enlace de la web).
+  Future<void> restablecerPassword({required String codigo, required String password}) async {
+    final res = await _publica(() => http.post(
+          Uri.parse('${ApiConfig.authBaseUrl}/api/auth/restablecer'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'token': codigo, 'password': password}),
+        ));
+    _checkOk(res, 'No se pudo restablecer la contraseña');
+  }
+
+  Future<http.Response> _publica(Future<http.Response> Function() peticion) async {
+    try {
+      return await peticion();
+    } catch (e) {
+      throw ApiException('No se pudo conectar con el servidor');
     }
   }
 
@@ -177,6 +221,12 @@ class AuthService {
       body: jsonEncode({'nombre': nombre, 'email': email, 'rol': rol, 'password': password}),
     );
     _checkOk(res, 'No se pudo editar el usuario');
+  }
+
+  /// Levanta el bloqueo por intentos fallidos (solo admin).
+  Future<void> desbloquearUsuario(int id) async {
+    final res = await ApiClient.put(Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios/$id/desbloquear'));
+    _checkOk(res, 'No se pudo desbloquear la cuenta');
   }
 
   Future<void> eliminarUsuario(int id) async {

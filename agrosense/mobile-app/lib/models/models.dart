@@ -385,6 +385,9 @@ class Usuario {
   final String rol;
   final String? fotoUrl;
   final DateTime? creadoEn;
+  /// Bloqueada por intentos fallidos (solo viene en el listado de admin)
+  final bool bloqueado;
+  final int segundosBloqueo;
 
   Usuario({
     required this.id,
@@ -393,6 +396,8 @@ class Usuario {
     required this.rol,
     this.fotoUrl,
     this.creadoEn,
+    this.bloqueado = false,
+    this.segundosBloqueo = 0,
   });
 
   factory Usuario.fromJson(Map<String, dynamic> json) {
@@ -403,6 +408,8 @@ class Usuario {
       rol: json['rol'] as String,
       fotoUrl: json['foto_url'] as String?,
       creadoEn: json['creado_en'] != null ? DateTime.tryParse(json['creado_en']) : null,
+      bloqueado: json['bloqueado'] == true,
+      segundosBloqueo: (json['segundos_bloqueo'] as num?)?.toInt() ?? 0,
     );
   }
 }

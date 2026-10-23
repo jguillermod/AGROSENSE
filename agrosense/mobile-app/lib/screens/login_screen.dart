@@ -4,6 +4,7 @@ import '../config/theme.dart';
 import '../services/auth_service.dart';
 import '../widgets/common.dart';
 import 'main_shell.dart';
+import 'recuperar_password_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -102,9 +103,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     validator: validarEmail,
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
+                  CampoPassword(
                     controller: _passwordController,
-                    obscureText: true,
                     decoration: const InputDecoration(
                       labelText: 'Contraseña',
                       prefixIcon: Icon(Icons.lock_outline),
@@ -126,8 +126,20 @@ class _LoginScreenState extends State<LoginScreen> {
                           : const Text('Ingresar'),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
 
+                  TextButton(
+                    onPressed: _loading
+                        ? null
+                        : () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => RecuperarPasswordScreen(emailInicial: _emailController.text.trim()),
+                              ),
+                            );
+                          },
+                    child: const Text('¿Olvidaste tu contraseña?'),
+                  ),
                   TextButton(
                     onPressed: _loading
                         ? null

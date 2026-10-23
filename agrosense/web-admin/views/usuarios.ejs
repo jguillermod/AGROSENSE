@@ -35,7 +35,14 @@
               <tr>
                 <td><i class="bi bi-person-circle"></i> <%= u.nombre %></td>
                 <td><%= u.email %></td>
-                <td><span class="badge <%= u.rol === 'admin' ? 'badge--success' : u.rol === 'agronomo' ? 'badge--info' : 'badge--neutral' %>"><%= { admin: 'Administrador', agricultor: 'Agricultor', agronomo: 'Agrónomo' }[u.rol] || u.rol %></span></td>
+                <td>
+                  <span class="badge <%= u.rol === 'admin' ? 'badge--success' : u.rol === 'agronomo' ? 'badge--info' : 'badge--neutral' %>"><%= { admin: 'Administrador', agricultor: 'Agricultor', agronomo: 'Agrónomo' }[u.rol] || u.rol %></span>
+                  <% if (u.bloqueado) { %>
+                    <span class="badge badge--danger" title="Bloqueada por intentos fallidos">
+                      <i class="bi bi-lock-fill"></i> Bloqueada (<%= Math.ceil(u.segundos_bloqueo / 60) %> min)
+                    </span>
+                  <% } %>
+                </td>
                 <td><%= (parcelasPorUsuario[u.id] || []).join(', ') || '—' %></td>
                 <td><%= new Date(u.creado_en).toLocaleDateString('es-ES') %></td>
                 <td class="row-actions">
@@ -49,6 +56,11 @@
                       onclick="abrirEditarUsuario(this)">
                       <i class="bi bi-pencil-fill"></i> Editar
                     </button>
+                    <% if (u.bloqueado) { %>
+                      <form method="POST" action="/usuarios/<%= u.id %>/desbloquear">
+                        <button type="submit" class="menu-item"><i class="bi bi-unlock-fill"></i> Desbloquear</button>
+                      </form>
+                    <% } %>
                     <% if (String(u.id) !== String(usuario.id)) { %>
                       <form method="POST" action="/usuarios/<%= u.id %>/eliminar"
                         onsubmit="return confirm('¿Eliminar al usuario &quot;<%= u.nombre %>&quot;?')">
@@ -89,7 +101,7 @@
             <option value="agronomo">Agrónomo</option>
             <option value="admin">Administrador</option>
           </select>
-          <p class="form-field-hint">Agrónomo: solo ve y opera las parcelas que le asignes abajo. Agricultor y administrador ven todas; solo el administrador gestiona sensores, usuarios y respaldos.</p>
+          <p class="form-field-hint">Agricultor: ve sus fincas y las parcelas que le asignes. Agrónomo: solo las parcelas que le asignes abajo. El administrador ve todo y es el único que gestiona usuarios y respaldos.</p>
         </div>
 
         <div class="field-group">

@@ -1890,3 +1890,50 @@ table.data-table {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* --- Mostrar u ocultar contraseña (public/js/ver-password.js) --- */
+/* Selectores con .password-campo para ganarle a .auth-card button y .input-icon-group i */
+
+.password-campo {
+  position: relative;
+  display: block;
+  flex: 1;
+  width: 100%;
+}
+
+.password-campo input {
+  padding-right: 2.8rem !important;
+}
+
+.password-campo button.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.35rem;
+  transform: translateY(-50%);
+  width: auto;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  box-shadow: none;
+  color: #6b7280;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.password-campo button.password-toggle:hover,
+.password-campo button.password-toggle:focus-visible {
+  background: #eef2ed;
+  color: #2e7d32;
+  transform: translateY(-50%);
+  box-shadow: none;
+  outline: none;
+}
+
+.password-campo .password-toggle i {
+  position: static;
+  color: inherit;
+  pointer-events: none;
+}

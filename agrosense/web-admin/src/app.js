@@ -186,7 +186,8 @@ app.get("/", (req, res) => res.redirect("/login"));
 
 app.get("/login", (req, res) => {
   const error = req.query.sesion === "expirada" ? "Tu sesión expiró o ya no es válida. Vuelve a iniciar sesión." : null;
-  res.render("login", { error });
+  const mensaje = req.query.restablecida === "1" ? "Contraseña actualizada. Ya puedes iniciar sesión." : null;
+  res.render("login", { error, mensaje });
 });
 
 app.post("/login", async (req, res) => {
@@ -197,7 +198,48 @@ app.post("/login", async (req, res) => {
     res.cookie("usuario", JSON.stringify(data.usuario));
     res.redirect("/dashboard");
   } catch (err) {
-    res.render("login", { error: "Credenciales inválidas" });
+    // 423 = cuenta bloqueada por intentos fallidos: el mensaje trae el tiempo restante.
+    // No se tocan las cookies: si en este navegador ya había otra sesión, sigue abierta.
+    const mensaje = err.response?.status === 423 ? err.response.data.error : "Credenciales inválidas";
+    res.render("login", { error: mensaje, mensaje: null });
+  }
+});
+
+// --- Recuperación de contraseña (pública; la lógica vive en auth-service) ---
+const RESET_PASSWORD_MIN = 8;
+
+app.get("/olvide", (req, res) => {
+  res.render("olvide", { error: null, mensaje: null, devEnlace: null, email: "" });
+});
+
+app.post("/olvide", async (req, res) => {
+  const email = String(req.body.email || "").trim();
+  try {
+    const { data } = await axios.post(`${AUTH_URL}/api/auth/recuperar`, { email });
+    // dev_enlace solo llega con DEV_SHOW_RESET_TOKEN=true (simulación sin correo)
+    res.render("olvide", { error: null, mensaje: data.mensaje, devEnlace: data.dev_enlace || null, email });
+  } catch (err) {
+    const mensaje = err.response?.data?.error || "No se pudo procesar la solicitud";
+    res.render("olvide", { error: mensaje, mensaje: null, devEnlace: null, email });
+  }
+});
+
+function renderRestablecer(res, token, error = null) {
+  res.set("Cache-Control", "no-store");
+  res.render("restablecer", { token, error, minimo: RESET_PASSWORD_MIN });
+}
+
+app.get("/restablecer", (req, res) => renderRestablecer(res, String(req.query.token || "")));
+
+app.post("/restablecer", async (req, res) => {
+  const token = String(req.body.token || "");
+  const { password, confirmacion } = req.body;
+  if (password !== confirmacion) return renderRestablecer(res, token, "Las contraseñas no coinciden");
+  try {
+    await axios.post(`${AUTH_URL}/api/auth/restablecer`, { token, password });
+    res.redirect("/login?restablecida=1");
+  } catch (err) {
+    renderRestablecer(res, token, err.response?.data?.error || "No se pudo restablecer la contraseña");
   }
 });
 
@@ -1194,6 +1236,17 @@ app.post("/usuarios/:id/editar", requireAuth, requireAdmin, async (req, res) => 
   } catch (err) {
     console.error(err.message);
     const mensaje = err.response?.data?.error || "No se pudo editar el usuario";
+    res.render("usuarios", await cargarUsuariosView({ error: mensaje }));
+  }
+});
+
+app.post("/usuarios/:id/desbloquear", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await axios.put(`${AUTH_URL}/api/auth/usuarios/${req.params.id}/desbloquear`);
+    res.redirect("/usuarios");
+  } catch (err) {
+    console.error(err.message);
+    const mensaje = err.response?.data?.error || "No se pudo desbloquear la cuenta";
     res.render("usuarios", await cargarUsuariosView({ error: mensaje }));
   }
 });

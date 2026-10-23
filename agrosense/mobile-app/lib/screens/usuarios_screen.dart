@@ -89,9 +89,8 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
                         validator: validarEmail,
                       ),
                       const SizedBox(height: 12),
-                      TextFormField(
+                      CampoPassword(
                         controller: passwordController,
-                        obscureText: true,
                         decoration: InputDecoration(
                           labelText: usuario == null ? 'Contraseña' : 'Nueva contraseña (opcional)',
                         ),
@@ -198,6 +197,16 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
     }
   }
 
+  Future<void> _desbloquear(Usuario usuario) async {
+    try {
+      await _authService.desbloquearUsuario(usuario.id);
+      if (mounted) mostrarExito(context, 'Cuenta desbloqueada');
+      await _refrescar();
+    } catch (e) {
+      if (mounted) mostrarError(context, e);
+    }
+  }
+
   Future<void> _eliminar(Usuario usuario) async {
     final confirmado = await confirmarAccion(
       context,
@@ -260,17 +269,28 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        EstadoBadge(
-                          texto: usuario.rol,
-                          color: colorRolUsuario(usuario.rol),
-                        ),
+                        if (usuario.bloqueado)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: EstadoBadge(
+                              texto: 'Bloqueada ${(usuario.segundosBloqueo / 60).ceil()} min',
+                              color: AppTheme.danger,
+                            ),
+                          )
+                        else
+                          EstadoBadge(
+                            texto: usuario.rol,
+                            color: colorRolUsuario(usuario.rol),
+                          ),
                         PopupMenuButton<String>(
                           onSelected: (v) {
                             if (v == 'editar') _abrirFormulario(datos, usuario: usuario);
+                            if (v == 'desbloquear') _desbloquear(usuario);
                             if (v == 'eliminar') _eliminar(usuario);
                           },
                           itemBuilder: (context) => [
                             const PopupMenuItem(value: 'editar', child: Text('Editar')),
+                            if (usuario.bloqueado) const PopupMenuItem(value: 'desbloquear', child: Text('Desbloquear')),
                             if (usuario.id != _miId) const PopupMenuItem(value: 'eliminar', child: Text('Eliminar')),
                           ],
                         ),

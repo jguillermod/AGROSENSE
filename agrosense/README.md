@@ -65,6 +65,7 @@ uno ya aplicado no hace daño):
 | `001_cultivos.sql` | Inventario de cultivos |
 | `002_riego.sql` | Programaciones y bitácora de riego, `parcelas.riego_automatico` |
 | `003_alertas_clima.sql` | Ciclo de vida de alertas (activa/atendida/resuelta, severidad, categoría sensor/climática), `parcelas.temperatura_min` (heladas), riegos "omitidos" |
+| `004_login_seguridad.sql` | Bloqueo de cuenta (`usuarios.intentos_fallidos`, `usuarios.bloqueado_hasta`) y tabla `password_resets` para recuperar la contraseña |
 
 ```bash
 for m in db/migrations/0*.sql; do
@@ -173,14 +174,12 @@ nunca de un `usuario_id` que mande el cliente.
 
 | Servicio | Público (sin token) | Requiere JWT |
 |---|---|---|
-| auth-service | `/health`, `POST /api/auth/login`, `POST /api/auth/register` con rol `agricultor` | `GET /api/auth/me`; administración de usuarios (listar, editar, eliminar, crear con otro rol): **admin**; ver o editar el propio perfil: el mismo usuario |
+| auth-service | `/health`, `POST /api/auth/login`, `POST /api/auth/register` con rol `agricultor`, `POST /api/auth/recuperar`, `POST /api/auth/restablecer` | `GET /api/auth/me`; administración de usuarios (listar, editar, eliminar, crear con otro rol, `PUT /api/auth/usuarios/:id/desbloquear`): **admin**; ver o editar el propio perfil: el mismo usuario |
 | fincas-service | `/health`, `POST /api/estaciones/vincular` (el sensor usa su token de un solo uso) | todo lo demás, con permisos por rol (abajo) |
 | lecturas-service | `/health`, `POST /api/lecturas` (ingesta: sigue con la `x-api-key` de la estación) | lecturas, exportación, registros manuales, alertas y `/api/clima` |
 | simulator-service | `/health` | control (`/status`, `/scenario`, `/pause`, `/resume`, `/speed`, `/clima`, `/clima/evento`, `/clima/eventos`, `/clima/aleatorio`): **admin**; `/reloj`: cualquier usuario |
 | backup-service | `/health` | `/backups/*`: **admin**, además de `x-backup-token` si `BACKUP_API_TOKEN` está definido |
 
-Todavía no existen recuperación de contraseña ni desbloqueo de cuentas: cuando se agreguen, la recuperación
-va como pública y el desbloqueo solo para admin (hay un comentario en `services/auth-service/src/index.js`).
 
 **Permisos por rol** (`services/fincas-service/src/permisos.js`, la misma copia en lecturas-service):
 
@@ -191,6 +190,49 @@ va como pública y el desbloqueo solo para admin (hay un comentario en `services
   lecturas, alertas, dashboard) solo traen lo que le corresponde.
 - Crear o eliminar parcelas y editar o eliminar una finca: su dueño o el admin. Asignar parcelas a otros
   usuarios: solo admin (un usuario solo puede auto-asignarse parcelas de sus propias fincas).
+
+### Bloqueo de cuenta por intentos fallidos
+
+(`services/auth-service/src/seguridadLogin.js`)
+
+- **5 intentos fallidos seguidos** bloquean la cuenta **15 minutos**. Mientras dure, ni la contraseña correcta
+  entra. El login responde **423** con el tiempo restante (`"Podrás intentarlo de nuevo en 14 min 20 s"`,
+  más `segundos_restantes` y `bloqueado_hasta`). La web y la app muestran ese mensaje tal cual.
+- Es 423 y no 401 a propósito: no trae `WWW-Authenticate`, así que **no cierra ninguna sesión abierta**. Si en
+  el navegador ya hay una sesión de otra cuenta, sigue abierta.
+- Un login correcto reinicia el contador. Al bloquear, el contador también vuelve a 0, así que al vencer
+  el bloqueo hay otros 5 intentos.
+- **Desbloquear**: en la web, **Usuarios** → menú de la fila → *Desbloquear* (la cuenta muestra la insignia
+  "Bloqueada (N min)"). En la app, **Usuarios** → ⋮ → *Desbloquear*. Por API: `PUT /api/auth/usuarios/:id/desbloquear`
+  con JWT de admin. Recuperar la contraseña también levanta el bloqueo.
+- Los tiempos se calculan con `NOW()` de la base, no con la hora de cada contenedor.
+
+### Recuperación de contraseña (simulada)
+
+1. En la web, **"¿Olvidaste tu contraseña?"** en el login (`/olvide`). En la app, el botón del mismo nombre.
+   Se pide el correo.
+2. auth-service responde **siempre el mismo mensaje**, exista o no el correo. Si existe, crea un token
+   aleatorio de un solo uso en `password_resets` (solo se guarda su hash sha256), que **vence en 30 minutos**.
+   Pedir uno nuevo invalida los anteriores.
+3. **No se envía correo**: el enlace (`/restablecer?token=…`, armado con `WEB_PUBLIC_URL`) y el código para la
+   app quedan en los logs:
+   ```bash
+   docker logs agrosense-auth 2>&1 | grep recuperacion
+   ```
+   Con `DEV_SHOW_RESET_TOKEN=true` en `.env` también se muestran en pantalla: la web enlaza a la página y la app
+   precarga el código. **Por defecto es `false`**; déjalo así fuera de desarrollo. En ese modo la respuesta sí
+   revela si el correo existe.
+4. En la pantalla de contraseña nueva (`/restablecer` en la web, segundo paso en la app) se define una
+   contraseña de **mínimo 8 caracteres**. Al usarla, el token queda invalidado. Un token usado, reemplazado,
+   vencido o inventado se rechaza con un mensaje claro.
+
+`POST /api/auth/recuperar` (`{ email }`) y `POST /api/auth/restablecer` (`{ token, password }`) son públicas
+(sin JWT). La página `/restablecer` se sirve con `Cache-Control: no-store` y `referrer: no-referrer`, para que
+el token de la URL no viaje en el `Referer` a la CDN de los íconos.
+
+Pendiente para producción: enviar el correo de verdad, limitar cuántas solicitudes por minuto acepta
+`/recuperar` y cerrar las sesiones abiertas al cambiar la contraseña (hoy un JWT ya emitido sigue
+valiendo hasta que vence).
 
 ### Llamadas entre servicios (`SERVICE_TOKEN`)
 
@@ -213,6 +255,8 @@ envía `X-Service-Token: <SERVICE_TOKEN>` y quien lo recibe lo trata como rol `s
 
 ### Variables y secretos
 
+`DEV_SHOW_RESET_TOKEN` (por defecto `false`) y `WEB_PUBLIC_URL` (por defecto `http://localhost:8080`) configuran la
+recuperación de contraseña; si no están en `.env` se usan esos valores.
 `JWT_SECRET` y `SERVICE_TOKEN` viven **solo en `.env`** (ya está en `.gitignore`); `docker-compose.yml` y
 `docker-compose.test.yml` los toman de ahí (`${JWT_SECRET}`, `${SERVICE_TOKEN}`) y fallan al levantar si faltan.
 Genera valores largos y aleatorios, distintos en cada ambiente, por ejemplo con `openssl rand -hex 32`.

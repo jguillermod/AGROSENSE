@@ -10,7 +10,23 @@ CREATE TABLE IF NOT EXISTS usuarios (
     -- parcelas que el admin le asignó en usuario_parcelas (RF-08).
     rol ENUM('admin', 'agricultor', 'agronomo') NOT NULL DEFAULT 'agricultor',
     foto_url VARCHAR(255) NULL,
+    -- Bloqueo tras 5 intentos fallidos seguidos (db/migrations/004_login_seguridad.sql)
+    intentos_fallidos INT NOT NULL DEFAULT 0,
+    bloqueado_hasta DATETIME NULL,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Recuperación de contraseña: token de un solo uso, guardado como hash sha256,
+-- vence a los 30 minutos (copia de db/migrations/004_login_seguridad.sql)
+CREATE TABLE IF NOT EXISTS password_resets (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    expira_en DATETIME NOT NULL,
+    usado_en DATETIME NULL,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    INDEX idx_password_resets_usuario (usuario_id)
 );
 
 CREATE TABLE IF NOT EXISTS fincas (

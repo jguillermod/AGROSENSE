@@ -5,6 +5,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const pool = require("./db");
 const { verificarJWT, soloAdmin } = require("./verificarJWT");
+const seguridad = require("./seguridadLogin");
 
 const app = express();
 app.use(cors());
@@ -67,21 +68,32 @@ app.post("/api/auth/register", registroPublicoOAdmin, async (req, res) => {
   }
 });
 
-// Login (RF-01)
+// Login (RF-01). Tras MAX_INTENTOS fallos seguidos la cuenta queda bloqueada
+// (423 con el tiempo restante, ver seguridadLogin.js); mientras dure, ni la
+// contraseña correcta entra.
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const [rows] = await pool.query("SELECT * FROM usuarios WHERE email = ?", [email]);
+    const [rows] = await pool.query(
+      `SELECT *, ${seguridad.SQL_SEGUNDOS_BLOQUEO} AS segundos_bloqueo FROM usuarios WHERE email = ?`,
+      [email]
+    );
     if (rows.length === 0) {
       return res.status(401).json({ error: "Credenciales inválidas" });
     }
 
     const usuario = rows[0];
-    const passwordOk = await bcrypt.compare(password, usuario.password_hash);
+    if (usuario.segundos_bloqueo > 0) return seguridad.responderBloqueo(res, Number(usuario.segundos_bloqueo));
+
+    const passwordOk = await bcrypt.compare(String(password || ""), usuario.password_hash);
     if (!passwordOk) {
+      const segundos = await seguridad.registrarFallo(usuario.id);
+      if (segundos > 0) return seguridad.responderBloqueo(res, segundos, true);
       return res.status(401).json({ error: "Credenciales inválidas" });
     }
+    // login correcto: se reinician los intentos fallidos
+    if (usuario.intentos_fallidos > 0 || usuario.bloqueado_hasta) await seguridad.desbloquear(usuario.id);
 
     const token = jwt.sign(
       { id: usuario.id, rol: usuario.rol, email: usuario.email },
@@ -99,9 +111,44 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// --- Recuperación de contraseña (pública, sin JWT) ---
+// Simulación: no se envía correo; el enlace queda en los logs de este servicio
+// y, solo con DEV_SHOW_RESET_TOKEN=true, también va en la respuesta.
+
+// Responde siempre lo mismo, exista o no el correo
+app.post("/api/auth/recuperar", async (req, res) => {
+  try {
+    const email = String((req.body || {}).email || "").trim();
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({ error: "El correo no tiene un formato válido" });
+    }
+    const creado = await seguridad.solicitarRecuperacion(email);
+    const respuesta = { mensaje: seguridad.MENSAJE_SOLICITUD };
+    if (seguridad.MOSTRAR_TOKEN && creado) {
+      respuesta.dev_token = creado.token;
+      respuesta.dev_enlace = creado.enlace;
+    }
+    res.json(respuesta);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "No se pudo procesar la solicitud" });
+  }
+});
+
+// Define la contraseña nueva con el token (de un solo uso, vence a los 30 min)
+app.post("/api/auth/restablecer", async (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+    const resultado = await seguridad.confirmarRecuperacion(token, password);
+    if (resultado.error) return res.status(resultado.status).json({ error: resultado.error });
+    res.json({ mensaje: "Contraseña actualizada. Ya puedes iniciar sesión." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "No se pudo restablecer la contraseña" });
+  }
+});
+
 // --- De aquí en adelante todo requiere sesión (JWT) ---
-// (No hay recuperación de contraseña ni desbloqueo de cuentas todavía: cuando
-// se agreguen, la recuperación va arriba como pública y el desbloqueo con soloAdmin.)
 app.use(verificarJWT);
 
 // Usuario de la sesión actual
@@ -123,9 +170,11 @@ app.get("/api/auth/me", async (req, res) => {
 app.get("/api/auth/usuarios", soloAdmin, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      "SELECT id, nombre, email, rol, foto_url, creado_en FROM usuarios ORDER BY creado_en DESC"
+      `SELECT id, nombre, email, rol, foto_url, creado_en, intentos_fallidos,
+              ${seguridad.SQL_SEGUNDOS_BLOQUEO} AS segundos_bloqueo
+       FROM usuarios ORDER BY creado_en DESC`
     );
-    res.json(rows);
+    res.json(rows.map((u) => ({ ...u, segundos_bloqueo: Number(u.segundos_bloqueo), bloqueado: u.segundos_bloqueo > 0 })));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al listar usuarios" });
@@ -232,6 +281,17 @@ app.put("/api/auth/usuarios/:id/perfil", soloPropioUsuario, async (req, res) => 
     }
     console.error(err);
     res.status(500).json({ error: "Error al actualizar el perfil" });
+  }
+});
+
+// Desbloquear una cuenta bloqueada por intentos fallidos (solo admin)
+app.put("/api/auth/usuarios/:id/desbloquear", soloAdmin, async (req, res) => {
+  try {
+    if (!(await seguridad.desbloquear(req.params.id))) return res.status(404).json({ error: "Usuario no encontrado" });
+    res.json({ id: Number(req.params.id), bloqueado: false });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al desbloquear la cuenta" });
   }
 });
 
