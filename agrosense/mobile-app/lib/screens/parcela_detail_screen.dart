@@ -37,10 +37,7 @@ class _ParcelaDetailScreenState extends State<ParcelaDetailScreen> {
     _cultivosFuture = _cargarCultivos();
   }
 
-  Future<List<Cultivo>> _cargarCultivos() async {
-    final usuarioId = await _authService.getUsuarioId();
-    return _dataService.getCultivosParcela(widget.parcela.id, usuarioId: usuarioId!);
-  }
+  Future<List<Cultivo>> _cargarCultivos() => _dataService.getCultivosParcela(widget.parcela.id);
 
   Future<void> _abrirCultivos() async {
     await Navigator.of(context).push(

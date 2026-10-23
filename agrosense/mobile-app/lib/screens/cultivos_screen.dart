@@ -7,14 +7,18 @@ import '../services/auth_service.dart';
 import '../services/data_service.dart';
 import '../widgets/common.dart';
 
-/// Inventario de cultivos de una parcela: lista + formulario para crear y
-/// editar. Se llega desde el detalle de la parcela, así que el agrónomo
-/// solo entra a las de sus parcelas asignadas; además el usuario_id viaja
-/// en cada petición y fincas-service rechaza cualquier otra.
+/// Inventario de cultivos: lista + formulario para crear y editar.
+/// - Con [parcela]: los de esa parcela (desde el detalle de la parcela).
+/// - Con [finca]: los de la finca completa y los de sus parcelas, agrupados
+///   por ubicación (desde la finca, en Parcelas).
+/// - Sin ninguna: todos los que el usuario puede ver, agrupados por finca.
+/// Los permisos los aplica fincas-service con el JWT: el agrónomo solo ve y
+/// gestiona los de sus parcelas asignadas, nunca los de la finca completa.
 class CultivosScreen extends StatefulWidget {
-  final Parcela parcela;
+  final Finca? finca;
+  final Parcela? parcela;
 
-  const CultivosScreen({super.key, required this.parcela});
+  const CultivosScreen({super.key, this.finca, this.parcela});
 
   @override
   State<CultivosScreen> createState() => _CultivosScreenState();
@@ -36,7 +40,7 @@ class _CultivosScreenState extends State<CultivosScreen> {
   final _dataService = DataService();
   final _formatoFecha = DateFormat('dd/MM/yyyy');
   late Future<List<Cultivo>> _cultivosFuture;
-  int? _usuarioId;
+  Future<OpcionesCultivo>? _opciones;
 
   @override
   void initState() {
@@ -44,9 +48,28 @@ class _CultivosScreenState extends State<CultivosScreen> {
     _cultivosFuture = _cargar();
   }
 
-  Future<List<Cultivo>> _cargar() async {
-    _usuarioId ??= await _authService.getUsuarioId();
-    return _dataService.getCultivosParcela(widget.parcela.id, usuarioId: _usuarioId!);
+  Future<List<Cultivo>> _cargar() {
+    final parcela = widget.parcela;
+    final finca = widget.finca;
+    if (parcela != null) return _dataService.getCultivosParcela(parcela.id);
+    if (finca != null) return _dataService.getCultivosFinca(finca.id);
+    return _dataService.getCultivos();
+  }
+
+  /// Fincas y parcelas donde puede registrar cultivos (se piden una vez,
+  /// al abrir el formulario por primera vez).
+  Future<OpcionesCultivo> _cargarOpciones() async {
+    final rol = await _authService.getUsuarioRol();
+    final usuarioId = await _authService.getUsuarioId();
+    final parcelas = await _dataService.getParcelasFlat();
+    if (rol == 'agronomo') return OpcionesCultivo.deParcelas(parcelas);
+    final fincas = await _dataService.getFincas();
+    return OpcionesCultivo(
+      fincas: fincas
+          .map((f) => FincaOpcion(id: f.id, nombre: f.nombre, propia: rol == 'admin' || f.usuarioId == usuarioId))
+          .toList(),
+      parcelas: parcelas,
+    );
   }
 
   Future<void> _refrescar() async {
@@ -57,13 +80,24 @@ class _CultivosScreenState extends State<CultivosScreen> {
   }
 
   Future<void> _abrirFormulario({Cultivo? cultivo}) async {
+    final OpcionesCultivo opciones;
+    try {
+      opciones = await (_opciones ??= _cargarOpciones());
+    } catch (e) {
+      _opciones = null; // se reintenta la próxima vez
+      if (mounted) mostrarError(context, 'No se pudieron cargar las fincas y parcelas');
+      return;
+    }
+    if (!mounted) return;
     final guardado = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _CultivoForm(
-        parcela: widget.parcela,
+      builder: (_) => CultivoForm(
+        opciones: opciones,
         cultivo: cultivo,
-        usuarioId: _usuarioId!,
+        // un cultivo nuevo se propone en la finca/parcela de esta pantalla
+        fincaInicial: cultivo?.fincaId ?? widget.parcela?.fincaId ?? widget.finca?.id,
+        parcelaInicial: cultivo != null ? cultivo.parcelaId : widget.parcela?.id,
         dataService: _dataService,
       ),
     );
@@ -77,11 +111,12 @@ class _CultivosScreenState extends State<CultivosScreen> {
     final confirmado = await confirmarAccion(
       context,
       titulo: 'Eliminar cultivo',
-      mensaje: '¿Eliminar "${cultivo.tipo}${cultivo.variedad != null ? ' ${cultivo.variedad}' : ''}" del inventario?',
+      mensaje: '¿Eliminar "${cultivo.tipo}${cultivo.variedad != null ? ' ${cultivo.variedad}' : ''}" '
+          '(${cultivo.ubicacion}) del inventario?',
     );
     if (!confirmado) return;
     try {
-      await _dataService.eliminarCultivo(cultivo.id, usuarioId: _usuarioId!);
+      await _dataService.eliminarCultivo(cultivo.id);
       if (mounted) mostrarExito(context, 'Cultivo eliminado');
       await _refrescar();
     } catch (e) {
@@ -101,10 +136,36 @@ class _CultivosScreenState extends State<CultivosScreen> {
     return '$texto (vencida)';
   }
 
+  /// Grupos en el orden en que llegan (el backend ya ordena): por finca en
+  /// el listado general, por ubicación en el de una finca, uno solo en el de
+  /// una parcela (sin título).
+  List<({String titulo, List<Cultivo> cultivos})> _agrupar(List<Cultivo> cultivos) {
+    if (widget.parcela != null) return [(titulo: '', cultivos: cultivos)];
+    final porFinca = widget.finca == null;
+    final grupos = <String, ({String titulo, List<Cultivo> cultivos})>{};
+    for (final c in cultivos) {
+      final clave = porFinca ? 'f${c.fincaId}' : 'p${c.parcelaId}';
+      final titulo = porFinca ? (c.fincaNombre ?? 'Finca #${c.fincaId}') : c.parcelaTexto;
+      grupos.putIfAbsent(clave, () => (titulo: titulo, cultivos: <Cultivo>[])).cultivos.add(c);
+    }
+    return grupos.values.toList();
+  }
+
+  String get _titulo {
+    final nombre = widget.parcela?.nombre ?? widget.finca?.nombre;
+    return nombre != null ? 'Cultivos · $nombre' : 'Cultivos';
+  }
+
+  String get _textoVacio {
+    if (widget.parcela != null) return 'Esta parcela todavía no tiene cultivos.\nToca "Nuevo cultivo" para registrar uno.';
+    if (widget.finca != null) return 'Esta finca todavía no tiene cultivos.\nToca "Nuevo cultivo" para registrar uno.';
+    return 'Todavía no hay cultivos registrados.\nToca "Nuevo cultivo" para registrar uno.';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Cultivos · ${widget.parcela.nombre}', maxLines: 1, overflow: TextOverflow.ellipsis)),
+      appBar: AppBar(title: Text(_titulo, maxLines: 1, overflow: TextOverflow.ellipsis)),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _abrirFormulario(),
         icon: const Icon(Icons.add),
@@ -118,19 +179,41 @@ class _CultivosScreenState extends State<CultivosScreen> {
             if (snapshot.connectionState == ConnectionState.waiting) return buildLoading();
             if (snapshot.hasError) {
               final error = snapshot.error.toString();
-              return buildErrorState(error.contains('asignada') ? error : 'No se pudieron cargar los cultivos');
+              final esPermiso = error.contains('asignada') || error.contains('acceso');
+              return buildErrorState(esPermiso ? error : 'No se pudieron cargar los cultivos');
             }
 
             final cultivos = snapshot.data ?? [];
-            if (cultivos.isEmpty) {
-              return buildEmptyState('Esta parcela todavía no tiene cultivos.\nToca "Nuevo cultivo" para registrar uno.');
-            }
+            if (cultivos.isEmpty) return buildEmptyState(_textoVacio);
 
-            return ListView.builder(
+            return ListView(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-              itemCount: cultivos.length,
-              itemBuilder: (context, index) {
-                final c = cultivos[index];
+              children: [
+                for (final grupo in _agrupar(cultivos)) ...[
+                  if (grupo.titulo.isNotEmpty) _encabezado(grupo.titulo, grupo.cultivos.length),
+                  for (final c in grupo.cultivos) _tarjeta(c),
+                ],
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _encabezado(String titulo, int total) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+      child: Text(
+        '$titulo · $total',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.darkGreen),
+      ),
+    );
+  }
+
+  Widget _tarjeta(Cultivo c) {
                 return Card(
                   margin: const EdgeInsets.only(bottom: 10),
                   child: Padding(
@@ -154,6 +237,9 @@ class _CultivosScreenState extends State<CultivosScreen> {
                                   ),
                                   if (c.variedad != null && c.variedad!.isNotEmpty)
                                     Text(c.variedad!, style: const TextStyle(fontSize: 12, color: AppTheme.neutralText)),
+                                  // en el listado general los grupos son fincas: falta decir la parcela
+                                  if (widget.finca == null && widget.parcela == null)
+                                    Text(c.parcelaTexto, style: const TextStyle(fontSize: 12, color: AppTheme.neutralText)),
                                 ],
                               ),
                             ),
@@ -183,12 +269,6 @@ class _CultivosScreenState extends State<CultivosScreen> {
                     ),
                   ),
                 );
-              },
-            );
-          },
-        ),
-      ),
-    );
   }
 
   Widget _dato(String etiqueta, String valor) {
@@ -207,22 +287,67 @@ class _CultivosScreenState extends State<CultivosScreen> {
   }
 }
 
+/// Una finca en el selector del formulario. [propia]: puede registrar
+/// cultivos de "Toda la finca" (admin, o el dueño si no es agrónomo); en las
+/// demás hay que elegir una de sus parcelas.
+class FincaOpcion {
+  final int id;
+  final String nombre;
+  final bool propia;
+
+  const FincaOpcion({required this.id, required this.nombre, required this.propia});
+}
+
+/// Dónde puede registrar cultivos el usuario.
+class OpcionesCultivo {
+  final List<FincaOpcion> fincas;
+  final List<ParcelaResumen> parcelas;
+
+  const OpcionesCultivo({required this.fincas, required this.parcelas});
+
+  /// Agrónomo: solo las fincas de sus parcelas, y siempre con parcela.
+  factory OpcionesCultivo.deParcelas(List<ParcelaResumen> parcelas) {
+    final fincas = <int, FincaOpcion>{};
+    for (final p in parcelas) {
+      fincas.putIfAbsent(p.fincaId, () => FincaOpcion(id: p.fincaId, nombre: p.fincaNombre, propia: false));
+    }
+    return OpcionesCultivo(fincas: fincas.values.toList(), parcelas: parcelas);
+  }
+
+  FincaOpcion? finca(int? id) {
+    for (final f in fincas) {
+      if (f.id == id) return f;
+    }
+    return null;
+  }
+
+  List<ParcelaResumen> parcelasDe(int? fincaId) => parcelas.where((p) => p.fincaId == fincaId).toList();
+}
+
 /// Formulario (bottom sheet) para crear o editar un cultivo. Guarda él
 /// mismo y devuelve true si se guardó, para poder mostrar el error de la
 /// API sin cerrar el formulario ni perder lo escrito.
-class _CultivoForm extends StatefulWidget {
-  final Parcela parcela;
+class CultivoForm extends StatefulWidget {
+  final OpcionesCultivo opciones;
   final Cultivo? cultivo;
-  final int usuarioId;
+  final int? fincaInicial;
+  final int? parcelaInicial;
   final DataService dataService;
 
-  const _CultivoForm({required this.parcela, this.cultivo, required this.usuarioId, required this.dataService});
+  const CultivoForm({
+    super.key,
+    required this.opciones,
+    this.cultivo,
+    this.fincaInicial,
+    this.parcelaInicial,
+    required this.dataService,
+  });
 
   @override
-  State<_CultivoForm> createState() => _CultivoFormState();
+  State<CultivoForm> createState() => _CultivoFormState();
 }
 
-class _CultivoFormState extends State<_CultivoForm> {
+class _CultivoFormState extends State<CultivoForm> {
   final _formKey = GlobalKey<FormState>();
   final _formatoFecha = DateFormat('dd/MM/yyyy');
   late final TextEditingController _tipo;
@@ -233,6 +358,8 @@ class _CultivoFormState extends State<_CultivoForm> {
   DateTime? _cosecha;
   late String _unidad;
   late String _estado;
+  int? _fincaId;
+  int? _parcelaId;
   bool _guardando = false;
   String? _error;
 
@@ -248,6 +375,20 @@ class _CultivoFormState extends State<_CultivoForm> {
     _cosecha = c?.fechaCosechaEstimada;
     _unidad = c?.unidad ?? 'plantas';
     _estado = c?.estado ?? 'sembrado';
+    // solo valores que existan en los selectores (si no, el Dropdown falla)
+    _fincaId = widget.opciones.finca(widget.fincaInicial)?.id;
+    final parcelas = widget.opciones.parcelasDe(_fincaId);
+    _parcelaId = parcelas.any((p) => p.id == widget.parcelaInicial) ? widget.parcelaInicial : null;
+  }
+
+  bool get _fincaPropia => widget.opciones.finca(_fincaId)?.propia ?? false;
+
+  void _elegirFinca(int? id) {
+    setState(() {
+      _fincaId = id;
+      // la parcela elegida solo sigue si es de la nueva finca
+      if (!widget.opciones.parcelasDe(id).any((p) => p.id == _parcelaId)) _parcelaId = null;
+    });
   }
 
   @override
@@ -291,8 +432,8 @@ class _CultivoFormState extends State<_CultivoForm> {
     try {
       await widget.dataService.guardarCultivo(
         id: widget.cultivo?.id,
-        usuarioId: widget.usuarioId,
-        parcelaId: widget.parcela.id,
+        fincaId: _fincaId!,
+        parcelaId: _parcelaId,
         tipo: _tipo.text.trim(),
         variedad: _variedad.text.trim().isEmpty ? null : _variedad.text.trim(),
         fechaSiembra: _siembra,
@@ -326,9 +467,39 @@ class _CultivoFormState extends State<_CultivoForm> {
                 widget.cultivo == null ? 'Nuevo cultivo' : 'Editar cultivo',
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.darkGreen),
               ),
-              Text(widget.parcela.nombre, style: const TextStyle(fontSize: 12, color: AppTheme.neutralText)),
               const SizedBox(height: 16),
               if (_error != null) ErrorBanner(mensaje: _error!),
+              DropdownButtonFormField<int>(
+                initialValue: _fincaId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Finca'),
+                items: widget.opciones.fincas
+                    .map((f) => DropdownMenuItem(value: f.id, child: Text(f.nombre, maxLines: 1, overflow: TextOverflow.ellipsis)))
+                    .toList(),
+                validator: (v) => v == null ? 'Elige una finca' : null,
+                onChanged: _elegirFinca,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int?>(
+                // se rehace al cambiar de finca: cambian las opciones
+                key: ValueKey('parcela-$_fincaId'),
+                initialValue: _parcelaId,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: _fincaPropia ? 'Parcela (opcional)' : 'Parcela',
+                  helperText: _fincaPropia ? '"Toda la finca" si ocupa varias parcelas o la finca completa' : null,
+                ),
+                hint: Text(_fincaId == null ? 'Primero elige la finca' : 'Elige una parcela'),
+                items: [
+                  if (_fincaPropia) const DropdownMenuItem<int?>(value: null, child: Text('Toda la finca')),
+                  ...widget.opciones
+                      .parcelasDe(_fincaId)
+                      .map((p) => DropdownMenuItem<int?>(value: p.id, child: Text(p.nombre, maxLines: 1, overflow: TextOverflow.ellipsis))),
+                ],
+                validator: (v) => (v == null && _fincaId != null && !_fincaPropia) ? 'Elige una parcela' : null,
+                onChanged: _fincaId == null ? null : (v) => setState(() => _parcelaId = v),
+              ),
+              const SizedBox(height: 12),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

@@ -541,8 +541,10 @@ class DashboardResumen {
   }
 }
 
-/// Un cultivo del inventario de una parcela. Las fechas llegan como texto
-/// YYYY-MM-DD (sin hora) y se interpretan como fecha local.
+/// Un cultivo del inventario: siempre de una finca y, opcionalmente, de una
+/// de sus parcelas (sin parcela = "Toda la finca": varias parcelas o la
+/// finca completa). Las fechas llegan como texto YYYY-MM-DD (sin hora) y se
+/// interpretan como fecha local.
 class Cultivo {
   static const estados = {
     'sembrado': 'Sembrado',
@@ -552,9 +554,10 @@ class Cultivo {
   static const unidades = ['plantas', 'kg', 'quintales'];
 
   final int id;
-  final int parcelaId;
-  final String? parcelaNombre;
+  final int fincaId;
   final String? fincaNombre;
+  final int? parcelaId;
+  final String? parcelaNombre;
   final String tipo;
   final String? variedad;
   final DateTime fechaSiembra;
@@ -566,9 +569,10 @@ class Cultivo {
 
   Cultivo({
     required this.id,
-    required this.parcelaId,
-    this.parcelaNombre,
+    required this.fincaId,
     this.fincaNombre,
+    this.parcelaId,
+    this.parcelaNombre,
     required this.tipo,
     this.variedad,
     required this.fechaSiembra,
@@ -581,12 +585,22 @@ class Cultivo {
 
   String get estadoTexto => estados[estado] ?? estado;
 
+  /// Cultivo de la finca completa (o de varias parcelas), sin parcela propia.
+  bool get esDeFinca => parcelaId == null;
+
+  /// Nombre de la parcela, o "Toda la finca".
+  String get parcelaTexto => esDeFinca ? 'Toda la finca' : (parcelaNombre ?? 'Parcela #$parcelaId');
+
+  /// "Finca / Parcela" o "Finca / Toda la finca".
+  String get ubicacion => '${fincaNombre ?? 'Finca #$fincaId'} / $parcelaTexto';
+
   factory Cultivo.fromJson(Map<String, dynamic> json) {
     return Cultivo(
       id: jsonEntero(json['id']),
-      parcelaId: jsonEntero(json['parcela_id']),
-      parcelaNombre: jsonTextoOpt(json['parcela_nombre']),
+      fincaId: jsonEntero(json['finca_id']),
       fincaNombre: jsonTextoOpt(json['finca_nombre']),
+      parcelaId: jsonEnteroOpt(json['parcela_id']),
+      parcelaNombre: jsonTextoOpt(json['parcela_nombre']),
       tipo: jsonTexto(json['tipo']),
       variedad: jsonTextoOpt(json['variedad']),
       fechaSiembra: jsonFecha(json['fecha_siembra']) ?? DateTime.now(),

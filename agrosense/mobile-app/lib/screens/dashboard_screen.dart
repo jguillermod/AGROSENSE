@@ -8,6 +8,7 @@ import '../services/auth_service.dart';
 import '../services/data_service.dart';
 import '../widgets/common.dart';
 import 'alertas_screen.dart';
+import 'cultivos_screen.dart';
 
 const _coloresFinca = [
   Color(0xFF66BB6A),
@@ -59,6 +60,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _abrirAlertas() async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AlertasScreen()));
+    if (mounted) _refrescar();
+  }
+
+  /// Inventario completo, agrupado por finca
+  Future<void> _abrirCultivos() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CultivosScreen()));
     if (mounted) _refrescar();
   }
 
@@ -161,6 +168,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       color: const Color(0xFF558B2F),
                       value: '${resumen.cultivosActivos}',
                       label: 'Cultivos activos',
+                      onTap: _abrirCultivos,
                     ),
                     _StatCard(
                       icon: Icons.water,

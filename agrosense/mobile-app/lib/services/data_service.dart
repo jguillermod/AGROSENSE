@@ -292,24 +292,38 @@ class DataService {
   }
 
   // --- Inventario de cultivos ---
-  // Siempre se manda el usuario_id: si es agrónomo, fincas-service solo le
-  // deja ver y gestionar cultivos de sus parcelas asignadas.
+  // Por finca o por parcela. fincas-service aplica los permisos con el JWT:
+  // el agrónomo solo ve y gestiona los de sus parcelas asignadas (nunca los
+  // de la finca completa).
 
   static final _formatoFecha = DateFormat('yyyy-MM-dd');
 
-  Future<List<Cultivo>> getCultivosParcela(int parcelaId, {required int usuarioId}) async {
-    final res = await ApiClient.get(
-      Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/cultivos?usuario_id=$usuarioId'),
-    );
+  /// Todos los cultivos que el usuario puede ver (ordenados por finca).
+  Future<List<Cultivo>> getCultivos() async {
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/cultivos'));
     _checkOk(res, 'No se pudieron cargar los cultivos');
     return jsonLista(jsonDecode(res.body)).map(Cultivo.fromJson).toList();
   }
 
-  /// Crea el cultivo si [id] es null; si no, lo edita.
+  /// Los de la finca completa y los de sus parcelas.
+  Future<List<Cultivo>> getCultivosFinca(int fincaId) async {
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/fincas/$fincaId/cultivos'));
+    _checkOk(res, 'No se pudieron cargar los cultivos');
+    return jsonLista(jsonDecode(res.body)).map(Cultivo.fromJson).toList();
+  }
+
+  Future<List<Cultivo>> getCultivosParcela(int parcelaId) async {
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/cultivos'));
+    _checkOk(res, 'No se pudieron cargar los cultivos');
+    return jsonLista(jsonDecode(res.body)).map(Cultivo.fromJson).toList();
+  }
+
+  /// Crea el cultivo si [id] es null; si no, lo edita. Sin [parcelaId] es
+  /// un cultivo de toda la finca.
   Future<void> guardarCultivo({
     int? id,
-    required int usuarioId,
-    required int parcelaId,
+    required int fincaId,
+    int? parcelaId,
     required String tipo,
     String? variedad,
     required DateTime fechaSiembra,
@@ -320,7 +334,7 @@ class DataService {
     String? notas,
   }) async {
     final body = jsonEncode({
-      'usuario_id': usuarioId,
+      'finca_id': fincaId,
       'parcela_id': parcelaId,
       'tipo': tipo,
       'variedad': variedad,
@@ -349,10 +363,8 @@ class DataService {
     }
   }
 
-  Future<void> eliminarCultivo(int id, {required int usuarioId}) async {
-    final res = await ApiClient.delete(
-      Uri.parse('${ApiConfig.fincasBaseUrl}/api/cultivos/$id?usuario_id=$usuarioId'),
-    );
+  Future<void> eliminarCultivo(int id) async {
+    final res = await ApiClient.delete(Uri.parse('${ApiConfig.fincasBaseUrl}/api/cultivos/$id'));
     _checkOk(res, 'No se pudo eliminar el cultivo');
   }
 

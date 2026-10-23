@@ -4,6 +4,7 @@ import '../config/theme.dart';
 import '../models/models.dart';
 import '../services/data_service.dart';
 import '../widgets/common.dart';
+import 'cultivos_screen.dart';
 import 'parcela_detail_screen.dart';
 
 class ParcelasScreen extends StatefulWidget {
@@ -20,6 +21,7 @@ class _ParcelasScreenState extends State<ParcelasScreen> {
   List<Finca> _fincas = [];
   Finca? _fincaActiva;
   Future<List<Parcela>>? _parcelasFuture;
+  Future<List<Cultivo>>? _cultivosFuture;
   bool _cargandoFincas = true;
   String? _errorFincas;
 
@@ -46,7 +48,10 @@ class _ParcelasScreenState extends State<ParcelasScreen> {
         _fincas = fincas;
         _fincaActiva = activa;
         _cargandoFincas = false;
-        if (activa != null) _parcelasFuture = _dataService.getParcelas(activa.id);
+        if (activa != null) {
+          _parcelasFuture = _dataService.getParcelas(activa.id);
+          _cultivosFuture = _dataService.getCultivosFinca(activa.id);
+        }
       });
     } catch (e) {
       setState(() {
@@ -60,6 +65,7 @@ class _ParcelasScreenState extends State<ParcelasScreen> {
     setState(() {
       _fincaActiva = finca;
       _parcelasFuture = _dataService.getParcelas(finca.id);
+      _cultivosFuture = _dataService.getCultivosFinca(finca.id);
     });
   }
 
@@ -67,8 +73,54 @@ class _ParcelasScreenState extends State<ParcelasScreen> {
     if (_fincaActiva == null) return;
     setState(() {
       _parcelasFuture = _dataService.getParcelas(_fincaActiva!.id);
+      // al borrar una parcela sus cultivos pasan a la finca: se recuentan
+      _cultivosFuture = _dataService.getCultivosFinca(_fincaActiva!.id);
     });
     await _parcelasFuture;
+  }
+
+  Future<void> _abrirCultivosFinca() async {
+    final finca = _fincaActiva;
+    if (finca == null) return;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => CultivosScreen(finca: finca)));
+    if (!mounted || _fincaActiva?.id != finca.id) return;
+    setState(() {
+      _cultivosFuture = _dataService.getCultivosFinca(finca.id);
+    });
+  }
+
+  /// Resumen de los cultivos de la finca (de la finca completa y de sus
+  /// parcelas); al tocarlo se abre el inventario de la finca.
+  Widget _tarjetaCultivosFinca() {
+    return FutureBuilder<List<Cultivo>>(
+      future: _cultivosFuture,
+      builder: (context, snapshot) {
+        final String subtitulo;
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          subtitulo = 'Cargando…';
+        } else if (snapshot.hasError) {
+          subtitulo = 'No se pudieron cargar los cultivos';
+        } else {
+          final cultivos = snapshot.data ?? [];
+          final activos = cultivos.where((c) => c.estado != 'cosechado').length;
+          final deFinca = cultivos.where((c) => c.esDeFinca).length;
+          subtitulo = cultivos.isEmpty
+              ? 'Sin cultivos registrados · toca para agregar'
+              : '$activos ${activos == 1 ? 'activo' : 'activos'} · ${cultivos.length} en total'
+                  '${deFinca > 0 ? ' · $deFinca de toda la finca' : ''}';
+        }
+        return Card(
+          margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: ListTile(
+            leading: const Icon(Icons.eco, color: AppTheme.primaryGreen),
+            title: const Text('Cultivos de la finca'),
+            subtitle: Text(subtitulo),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _abrirCultivosFinca,
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _abrirFormulario({Parcela? parcela}) async {
@@ -233,6 +285,7 @@ class _ParcelasScreenState extends State<ParcelasScreen> {
             },
           ),
         ),
+        _tarjetaCultivosFinca(),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refrescarParcelas,

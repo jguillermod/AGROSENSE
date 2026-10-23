@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../services/auth_service.dart';
 import '../services/data_service.dart';
 import '../widgets/common.dart';
+import 'cultivos_screen.dart';
 import 'parcela_detail_screen.dart';
 
 /// Pantalla del rol agrónomo: a diferencia de [ParcelasScreen] (que
@@ -388,7 +389,16 @@ class _MisParcelasScreenState extends State<MisParcelasScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Mis parcelas')),
+      appBar: AppBar(
+        title: const Text('Mis parcelas'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.eco_outlined),
+            tooltip: 'Cultivos de mis parcelas',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CultivosScreen())),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         // varias pestañas del menú viven a la vez (IndexedStack): sin tag propio chocan al navegar
         heroTag: null,
