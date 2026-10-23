@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -6,6 +8,8 @@ import 'package:intl/intl.dart';
 import 'config/theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_shell.dart';
+import 'services/api_client.dart';
+import 'services/api_exception.dart';
 import 'services/auth_service.dart';
 
 Future<void> main() async {
@@ -13,6 +17,13 @@ Future<void> main() async {
   // Fechas y números en español (DateFormat/NumberFormat sin locale explícito)
   Intl.defaultLocale = 'es';
   await initializeDateFormatting('es');
+  // Cuando la sesión expira, ApiClient vuelve al login y lanza
+  // SesionExpiradaException; las pantallas que se cierran en ese momento ya
+  // no escuchan sus peticiones pendientes, así que esos errores se dan por
+  // manejados en vez de ensuciar la consola.
+  final manejadorAnterior = PlatformDispatcher.instance.onError;
+  PlatformDispatcher.instance.onError = (error, stack) =>
+      error is SesionExpiradaException || (manejadorAnterior?.call(error, stack) ?? false);
   runApp(const AgroSenseApp());
 }
 
@@ -24,6 +35,9 @@ class AgroSenseApp extends StatelessWidget {
     return MaterialApp(
       title: 'AgroSense',
       debugShowCheckedModeBanner: false,
+      // ApiClient vuelve al login desde cualquier pantalla si el token deja de ser válido
+      navigatorKey: ApiClient.navigatorKey,
+      scaffoldMessengerKey: ApiClient.scaffoldMessengerKey,
       theme: AppTheme.lightTheme,
       // Español en calendarios, selectores de hora y textos de Material
       locale: const Locale('es'),

@@ -13,6 +13,14 @@ x-node-healthcheck: &node-healthcheck
   retries: 3
   start_period: 30s
 
+# Secretos de autenticación: se interpolan desde .env (nunca se escriben aquí).
+# web-admin y auth solo necesitan JWT_SECRET; los que se llaman entre sí, también SERVICE_TOKEN.
+x-jwt-env: &jwt-env
+  JWT_SECRET: ${JWT_SECRET:?Falta JWT_SECRET en .env}
+x-servicio-env: &servicio-env
+  JWT_SECRET: ${JWT_SECRET:?Falta JWT_SECRET en .env}
+  SERVICE_TOKEN: ${SERVICE_TOKEN:?Falta SERVICE_TOKEN en .env}
+
 services:
   mysql:
     image: mariadb:11
@@ -58,6 +66,7 @@ services:
     container_name: agrosense-auth
     restart: unless-stopped
     env_file: .env
+    environment: *jwt-env
     ports:
       - "3001:3000"
     depends_on:
@@ -73,6 +82,7 @@ services:
     container_name: agrosense-fincas
     restart: unless-stopped
     env_file: .env
+    environment: *servicio-env
     ports:
       - "3002:3000"
     depends_on:
@@ -88,6 +98,7 @@ services:
     container_name: agrosense-lecturas
     restart: unless-stopped
     env_file: .env
+    environment: *servicio-env
     ports:
       - "3003:3000"
     depends_on:
@@ -128,6 +139,7 @@ services:
     container_name: agrosense-simulator
     restart: unless-stopped
     env_file: .env
+    environment: *servicio-env
     ports:
       - "3004:3000"
     depends_on:
@@ -149,6 +161,7 @@ services:
     container_name: agrosense-backup
     restart: unless-stopped
     env_file: .env
+    environment: *jwt-env
     ports:
       - "3005:3000"
     depends_on:
@@ -165,6 +178,7 @@ services:
     container_name: agrosense-web
     restart: unless-stopped
     env_file: .env
+    environment: *jwt-env
     ports:
       - "8080:3000"
     depends_on:

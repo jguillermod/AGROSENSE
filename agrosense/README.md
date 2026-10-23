@@ -27,11 +27,14 @@ agrosense/
 
 ## Cómo levantar el ambiente de DESARROLLO local
 
-1. Copiar `.env.example` a `.env` y ajustar contraseñas.
+1. Copiar `.env.example` a `.env` y ajustar contraseñas, `JWT_SECRET` y `SERVICE_TOKEN`
+   (ver [Seguridad](#seguridad)).
 2. Levantar todo:
    ```bash
    docker compose up --build
    ```
+   Si cambió algún `package.json`, agrega `-V` (`docker compose up --build -d -V`): cada servicio guarda
+   `node_modules` en un volumen anónimo y sin `-V` se queda con los módulos viejos.
 3. Servicios disponibles: ver la tabla de puertos abajo.
 4. Para apagar: `docker compose down` (agregar `-v` si además quieres borrar los datos de la DB **y los respaldos**).
 
@@ -47,6 +50,7 @@ agrosense/
 | backup-service | 3005 | 4005 | Respaldos |
 | MariaDB | 3307 | 3316 | Base de datos |
 | phpMyAdmin | 8081 | — | Administrar la base |
+| Uptime Kuma | 3010 | 4010 | Monitoreo de salud y página de estado |
 
 El etl-service no publica puertos (corre cada `ETL_INTERVAL_MINUTES`; en desarrollo, 5).
 
@@ -89,15 +93,16 @@ No toca fincas, parcelas ni estaciones reales. Luego envía una lectura por esta
 cada `SIM_INTERVAL_SECONDS` (humedad con evaporación y riegos, temperatura con ciclo
 día/noche acelerado por `SIM_TIME_SCALE`, humedad ambiental inversa a la temperatura).
 
-Control:
+Control (exige el JWT de un admin; cómo obtenerlo en [Seguridad](#seguridad)):
 
 ```bash
-curl http://localhost:3004/status
-curl -X POST http://localhost:3004/scenario -H "Content-Type: application/json" -d '{"nombre":"sequia"}'
+AUTH="Authorization: Bearer $TOKEN"
+curl -H "$AUTH" http://localhost:3004/status
+curl -H "$AUTH" -X POST http://localhost:3004/scenario -H "Content-Type: application/json" -d '{"nombre":"sequia"}'
 # escenarios: normal | sequia | ola_calor | exceso_lluvia
-curl -X POST http://localhost:3004/pause
-curl -X POST http://localhost:3004/resume
-curl -X POST http://localhost:3004/speed -H "Content-Type: application/json" -d '{"intervalo":5}'
+curl -H "$AUTH" -X POST http://localhost:3004/pause
+curl -H "$AUTH" -X POST http://localhost:3004/resume
+curl -H "$AUTH" -X POST http://localhost:3004/speed -H "Content-Type: application/json" -d '{"intervalo":5}'
 ```
 
 Los escenarios llevan los valores poco a poco más allá de los umbrales de cada parcela,
@@ -110,13 +115,13 @@ aleatorios (`SIM_CLIMA_ALEATORIO`, por defecto ~1 por día simulado) se anuncian
 anticipación, así primero aparecen en el pronóstico y después ocurren.
 
 ```bash
-curl http://localhost:3004/clima          # ahora, pronóstico y eventos programados
+curl -H "$AUTH" http://localhost:3004/clima          # ahora, pronóstico y eventos programados
 # Evento a mano (horas simuladas); "en_horas" es opcional, para verlo primero en el pronóstico
-curl -X POST http://localhost:3004/clima/evento -H "Content-Type: application/json" \
+curl -H "$AUTH" -X POST http://localhost:3004/clima/evento -H "Content-Type: application/json" \
      -d '{"tipo":"helada","duracion_horas":3,"en_horas":4}'
 # tipos: lluvia | helada | ola_calor | viento
-curl -X DELETE http://localhost:3004/clima/eventos   # cancela los eventos en curso y programados
-curl -X POST http://localhost:3004/clima/aleatorio -H "Content-Type: application/json" -d '{"activo":false}'
+curl -H "$AUTH" -X DELETE http://localhost:3004/clima/eventos   # cancela los eventos en curso y programados
+curl -H "$AUTH" -X POST http://localhost:3004/clima/aleatorio -H "Content-Type: application/json" -d '{"activo":false}'
 ```
 
 Efecto en las lecturas: la lluvia sube la humedad (suelo y ambiente) y baja la temperatura, la helada
@@ -139,19 +144,157 @@ Hace uno automático cada `BACKUP_INTERVAL_HOURS` (24) y borra los más viejos q
 En el panel web: **Respaldos** (solo admin) para crear, descargar, restaurar (hay que escribir
 RESTAURAR) y eliminar, además de exportar lecturas, alertas, cultivos y bitácora de riego en CSV.
 
-Probar respaldo y restauración (con la API directa):
+Probar respaldo y restauración con la API directa (JWT de admin y, si definiste `BACKUP_API_TOKEN`,
+también la cabecera `x-backup-token`; exporta esa variable en tu terminal sin pegarla en ningún archivo):
 
 ```bash
-curl -X POST http://localhost:3005/backups                    # 1. respaldo manual
-curl http://localhost:3005/backups                            # 2. aparece en la lista
-curl -o prueba.sql.gz http://localhost:3005/backups/<nombre>/descargar   # 3. descarga (no la subas al repo)
+AUTH="Authorization: Bearer $TOKEN"; LLAVE="x-backup-token: $BACKUP_API_TOKEN"
+curl -H "$AUTH" -H "$LLAVE" -X POST http://localhost:3005/backups        # 1. respaldo manual
+curl -H "$AUTH" -H "$LLAVE" http://localhost:3005/backups                # 2. aparece en la lista
+curl -H "$AUTH" -H "$LLAVE" -o prueba.sql.gz http://localhost:3005/backups/<nombre>/descargar   # 3. descarga (no la subas al repo)
 # 4. borra algo de prueba (p. ej. un cultivo desde la web) y restaura:
-curl -X POST http://localhost:3005/backups/<nombre>/restaurar
+curl -H "$AUTH" -H "$LLAVE" -X POST http://localhost:3005/backups/<nombre>/restaurar
 # 5. el dato vuelve. Antes de restaurar se crea un respaldo "seguridad" del estado anterior.
 ```
 
-Antes de restaurar se crea siempre un respaldo de seguridad. Si el puerto 3005 queda accesible fuera
-de tu PC, define `BACKUP_API_TOKEN` (web-admin lo envía en la cabecera `x-backup-token`).
+Antes de restaurar se crea siempre un respaldo de seguridad. `BACKUP_API_TOKEN` es una segunda llave
+(web-admin la envía en `x-backup-token`), recomendada si el puerto 3005 queda accesible fuera de tu PC.
+
+## Seguridad
+
+### Sesión (JWT) en los microservicios
+
+auth-service firma un JWT al iniciar sesión (`{ id, rol }`, dura `JWT_EXPIRES_IN`). Los demás servicios lo
+validan con el mismo `JWT_SECRET` usando el middleware `verificarJWT` (`services/*/src/verificarJWT.js`,
+**copia idéntica en cada servicio**: si cambias uno, copia el archivo a los demás). Toda petición protegida
+debe traer `Authorization: Bearer <token>`; si falta, es inválido o venció, el servicio responde **401** con un
+mensaje claro y la cabecera `WWW-Authenticate: Bearer`. Los permisos por rol salen siempre del token,
+nunca de un `usuario_id` que mande el cliente.
+
+| Servicio | Público (sin token) | Requiere JWT |
+|---|---|---|
+| auth-service | `/health`, `POST /api/auth/login`, `POST /api/auth/register` con rol `agricultor` | `GET /api/auth/me`; administración de usuarios (listar, editar, eliminar, crear con otro rol): **admin**; ver o editar el propio perfil: el mismo usuario |
+| fincas-service | `/health`, `POST /api/estaciones/vincular` (el sensor usa su token de un solo uso) | todo lo demás, con permisos por rol (abajo) |
+| lecturas-service | `/health`, `POST /api/lecturas` (ingesta: sigue con la `x-api-key` de la estación) | lecturas, exportación, registros manuales, alertas y `/api/clima` |
+| simulator-service | `/health` | control (`/status`, `/scenario`, `/pause`, `/resume`, `/speed`, `/clima`, `/clima/evento`, `/clima/eventos`, `/clima/aleatorio`): **admin**; `/reloj`: cualquier usuario |
+| backup-service | `/health` | `/backups/*`: **admin**, además de `x-backup-token` si `BACKUP_API_TOKEN` está definido |
+
+Todavía no existen recuperación de contraseña ni desbloqueo de cuentas: cuando se agreguen, la recuperación
+va como pública y el desbloqueo solo para admin (hay un comentario en `services/auth-service/src/index.js`).
+
+**Permisos por rol** (`services/fincas-service/src/permisos.js`, la misma copia en lecturas-service):
+
+- **admin**: todo.
+- **agricultor**: sus fincas (`fincas.usuario_id`) con todas sus parcelas, más las parcelas que el admin le asigne.
+- **agrónomo**: sus parcelas asignadas (y las de fincas que él mismo registre desde la app).
+- Una parcela o finca fuera de su alcance responde **403**; los listados (fincas, parcelas, cultivos, riego,
+  lecturas, alertas, dashboard) solo traen lo que le corresponde.
+- Crear o eliminar parcelas y editar o eliminar una finca: su dueño o el admin. Asignar parcelas a otros
+  usuarios: solo admin (un usuario solo puede auto-asignarse parcelas de sus propias fincas).
+
+### Llamadas entre servicios (`SERVICE_TOKEN`)
+
+Cuando un servicio llama a otro no hay usuario detrás, así que **nunca se reenvía el JWT de un usuario**: se
+envía `X-Service-Token: <SERVICE_TOKEN>` y quien lo recibe lo trata como rol `servicio` (equivale a admin).
+
+- simulator → fincas: preparar los datos demo y leer los riegos en curso.
+- fincas (motor de riego) → simulator `/reloj`.
+- lecturas → simulator `/clima` (solo si el proveedor es el simulador; a un `CLIMA_PROVIDER_URL` externo no se le envía).
+- simulator → lecturas `POST /api/lecturas` sigue usando la `x-api-key` de cada estación, como un sensor real.
+
+### Web y app
+
+- **web-admin** guarda el JWT en una cookie `httpOnly` y lo reenvía como `Authorization: Bearer` en cada
+  llamada a los servicios (interceptor de axios + `AsyncLocalStorage` en `web-admin/src/app.js`). Si un servicio
+  responde 401 de sesión, borra la cookie y redirige a `/login?sesion=expirada`.
+- **App Flutter**: todas las peticiones pasan por `ApiClient` (`mobile-app/lib/services/api_client.dart`), que
+  agrega el token guardado. Ante un 401 de sesión borra la sesión y vuelve al login. Solo login y auto-registro
+  van sin token.
+
+### Variables y secretos
+
+`JWT_SECRET` y `SERVICE_TOKEN` viven **solo en `.env`** (ya está en `.gitignore`); `docker-compose.yml` y
+`docker-compose.test.yml` los toman de ahí (`${JWT_SECRET}`, `${SERVICE_TOKEN}`) y fallan al levantar si faltan.
+Genera valores largos y aleatorios, distintos en cada ambiente, por ejemplo con `openssl rand -hex 32`.
+Ojo: el ambiente de pruebas también los interpola desde `.env` (no desde `.env.test`), igual que la contraseña
+de la base.
+
+### Obtener un token para probar con curl
+
+```bash
+# escribe tu contraseña cuando la pida; el token queda solo en la variable de esta terminal
+read -rsp "Contraseña: " PASS; echo
+TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login -H "Content-Type: application/json" \
+  -d "{\"email\":\"tu-correo@ejemplo.com\",\"password\":\"$PASS\"}" | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+unset PASS
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/auth/me
+```
+
+## Monitoreo con Uptime Kuma
+
+Cada servicio HTTP responde `GET /health` con `{"status":"ok", ...}` sin pedir sesión, y cada contenedor
+tiene un healthcheck de Docker (`docker compose ps` muestra `healthy` / `unhealthy`). El etl-service no
+expone HTTP: su bucle principal escribe un archivo de latido (`/tmp/etl_heartbeat`) cada 30 s y
+`healthcheck.py` lo marca `unhealthy` si pasa más de 120 s sin actualizarse.
+
+### 1. Crear la cuenta de administración
+
+1. Levanta el ambiente (`docker compose up --build -d`) y abre <http://localhost:3010>.
+2. La primera vez pide crear un usuario administrador: elige usuario y contraseña (se guardan en el
+   volumen `uptime_data`, así que sobreviven a `docker compose down`; se borran con `down -v`).
+
+### 2. Agregar los monitores HTTP
+
+Uptime Kuma corre dentro de la red de Docker, así que usa los **nombres de servicio y el puerto interno
+3000**, no `localhost` ni los puertos publicados. Para cada fila de la tabla:
+
+1. Clic en **+ Agregar monitor** (*Add New Monitor*).
+2. **Tipo de monitor**: `HTTP(s)`.
+3. **Nombre amigable** y **URL**: según la tabla.
+4. **Intervalo de latido** (*Heartbeat Interval*): `30` segundos.
+5. **Reintentos** (*Retries*): `2` (evita falsas alarmas mientras un servicio se reinicia).
+6. **Guardar**.
+
+| Nombre | URL (desarrollo) | URL (pruebas, puerto 4010) |
+|---|---|---|
+| Auth | `http://auth-service:3000/health` | `http://auth-service-test:3000/health` |
+| Fincas | `http://fincas-service:3000/health` | `http://fincas-service-test:3000/health` |
+| Lecturas | `http://lecturas-service:3000/health` | `http://lecturas-service-test:3000/health` |
+| Simulador | `http://simulator-service:3000/health` | `http://simulator-service-test:3000/health` |
+| Respaldos | `http://backup-service:3000/health` | `http://backup-service-test:3000/health` |
+| Panel web | `http://web-admin:3000/health` | `http://web-admin-test:3000/health` |
+
+Opcional, para la base de datos: monitor tipo **TCP Port**, nombre `MariaDB`, host `mysql`
+(`mysql-test` en pruebas), puerto `3306`, intervalo 30 s.
+
+### 3. Monitorear el ETL
+
+Como el ETL no tiene URL, se vigila su healthcheck de Docker:
+
+1. Agrega `/var/run/docker.sock:/var/run/docker.sock:ro` a los `volumes` de `uptime-kuma` en
+   `docker-compose.yml` y recrea el contenedor (`docker compose up -d uptime-kuma`).
+   Ojo: el socket da a Uptime Kuma control sobre Docker; úsalo solo en tu PC.
+2. En Uptime Kuma: **Configuración → Docker Hosts → Configurar Docker Host**, nombre `local`,
+   tipo `Socket`, ruta `/var/run/docker.sock`.
+3. Nuevo monitor tipo **Docker Container**, nombre `ETL`, contenedor `agrosense-etl`, host `local`,
+   intervalo 30 s. Se pone en rojo si el contenedor se detiene o queda `unhealthy`.
+
+Sin el socket, revísalo a mano con `docker inspect --format '{{.State.Health.Status}}' agrosense-etl`.
+
+### 4. Armar la página de estado
+
+1. Menú **Páginas de estado** (*Status Pages*) → **+ Nueva página de estado**.
+2. **Nombre**: `AgroSense`; **Slug**: `agrosense` → **Siguiente**.
+3. En el editor, **+ Agregar grupo**, por ejemplo:
+   - `Servicios`: Auth, Fincas, Lecturas, Simulador, Respaldos.
+   - `Datos`: MariaDB, ETL.
+   - `Interfaz`: Panel web.
+4. En cada grupo, usa **Agregar un monitor** para elegir los monitores creados arriba.
+5. Opcional: descripción, texto del pie y marcar **Mostrar etiquetas**.
+6. **Guardar**. La página queda pública en <http://localhost:3010/status/agrosense> (sin login).
+
+Para avisos, en **Configuración → Notificaciones** puedes conectar Telegram, Discord, correo, etc.,
+y activarlas en cada monitor.
 
 ## Cómo levantar el ambiente de PRUEBAS local
 

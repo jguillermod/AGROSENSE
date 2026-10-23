@@ -22,3 +22,9 @@ class ApiException implements Exception {
     return ApiException(fallback);
   }
 }
+
+/// El servicio rechazó el token de la sesión (401 con WWW-Authenticate).
+/// ApiClient ya cerró la sesión y volvió al login al lanzarla.
+class SesionExpiradaException extends ApiException {
+  SesionExpiradaException() : super('Tu sesión expiró. Vuelve a iniciar sesión.');
+}

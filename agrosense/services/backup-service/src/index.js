@@ -1,12 +1,13 @@
 require("dotenv").config();
 const express = require("express");
 const respaldos = require("./respaldos");
+const { verificarJWT, soloAdmin } = require("./verificarJWT");
 
 const INTERVALO_HORAS = Number(process.env.BACKUP_INTERVAL_HOURS) || 24;
 const AL_ARRANCAR = process.env.BACKUP_ON_START === "true";
-// Si se define, todas las rutas /backups exigen la cabecera x-backup-token
-// (el panel web la envía). Sin definir, el servicio confía en la red interna
-// igual que los demás microservicios.
+// Todas las rutas /backups exigen el JWT de un admin (el panel web reenvía el
+// de la sesión) y, si se define BACKUP_API_TOKEN, también la cabecera
+// x-backup-token (el panel la envía): una segunda llave por si el puerto queda expuesto.
 const TOKEN = process.env.BACKUP_API_TOKEN || "";
 
 const app = express();
@@ -23,6 +24,7 @@ app.use("/backups", (req, res, next) => {
   if (TOKEN && req.get("x-backup-token") !== TOKEN) return res.status(401).json({ error: "Token de respaldo inválido" });
   next();
 });
+app.use("/backups", verificarJWT, soloAdmin);
 
 const manejar = (fn) => async (req, res) => {
   try {

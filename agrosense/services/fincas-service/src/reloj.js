@@ -11,6 +11,8 @@
 // son la fecha/hora local. Así se comparan y se guardan tal cual en columnas
 // DATETIME, igual que las escribe la gente ("regar a las 06:00").
 
+const { cabeceraServicio } = require("./verificarJWT");
+
 const MODO = process.env.RIEGO_RELOJ === "real" ? "real" : "simulado";
 const SIMULATOR_URL = process.env.SIMULATOR_SERVICE_URL || "http://simulator-service:3000";
 const ZONA = process.env.APP_TIMEZONE || "America/Guatemala";
@@ -36,7 +38,8 @@ function horaRealDePared() {
 // { fecha: Date de pared, modo, escala, pausado }
 async function ahora() {
   if (MODO === "real") return { fecha: horaRealDePared(), modo: "real", escala: 1, pausado: false };
-  const res = await fetch(`${SIMULATOR_URL}/reloj`, { signal: AbortSignal.timeout(3000) });
+  // llamada interna: token de servicio, nunca el JWT de un usuario
+  const res = await fetch(`${SIMULATOR_URL}/reloj`, { headers: cabeceraServicio(), signal: AbortSignal.timeout(3000) });
   if (!res.ok) throw new Error(`el simulador respondió ${res.status}`);
   const data = await res.json();
   return { fecha: new Date(`${data.fecha_hora}Z`), modo: "simulado", escala: data.escala, pausado: data.pausado };

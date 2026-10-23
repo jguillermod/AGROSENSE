@@ -288,6 +288,8 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
         builder: (context, snapshot) {
           if (!snapshot.hasData) return const SizedBox.shrink();
           return FloatingActionButton(
+            // varias pestañas del menú viven a la vez (IndexedStack): sin tag propio chocan al navegar
+            heroTag: null,
             onPressed: () => _abrirFormulario(snapshot.data!),
             child: const Icon(Icons.person_add),
           );

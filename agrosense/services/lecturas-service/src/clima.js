@@ -12,8 +12,11 @@
 
 const pool = require("./db");
 const { abrirOActualizar, resolver } = require("./alertas");
+const { cabeceraServicio } = require("./verificarJWT");
 
 const PROVEEDOR_URL = process.env.CLIMA_PROVIDER_URL || process.env.SIMULATOR_SERVICE_URL || "http://simulator-service:3000";
+// El token interno solo viaja al simulador; nunca a un proveedor externo (CLIMA_PROVIDER_URL)
+const CABECERAS_PROVEEDOR = process.env.CLIMA_PROVIDER_URL ? {} : cabeceraServicio();
 const INTERVALO_MS = (Number(process.env.CLIMA_POLL_SECONDS) || 10) * 1000;
 
 // Tipos de alerta climática. Los dos de lluvia los consulta también el motor
@@ -111,7 +114,7 @@ function evaluarParcela(parcela, clima) {
 async function revisar() {
   let clima;
   try {
-    const res = await fetch(`${PROVEEDOR_URL}/clima`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`${PROVEEDOR_URL}/clima`, { headers: CABECERAS_PROVEEDOR, signal: AbortSignal.timeout(4000) });
     if (!res.ok) throw new Error(`el proveedor de clima respondió ${res.status}`);
     clima = await res.json();
   } catch (err) {

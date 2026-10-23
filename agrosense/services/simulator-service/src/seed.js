@@ -16,6 +16,7 @@ const crypto = require("crypto");
 const fs = require("fs/promises");
 const path = require("path");
 const pool = require("./db");
+const { cabeceraServicio } = require("./verificarJWT");
 
 const FINCAS_URL = process.env.FINCAS_SERVICE_URL || "http://fincas-service:3000";
 const FINCA_NOMBRE = process.env.SIM_FINCA_NOMBRE || "Finca Demo (Simulador)";
@@ -82,7 +83,8 @@ async function prepararCultivosDemo(parcela) {
 async function api(method, ruta, body) {
   const res = await fetch(`${FINCAS_URL}${ruta}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    // llamada interna a fincas-service: token de servicio (no hay usuario detrás)
+    headers: { "Content-Type": "application/json", ...cabeceraServicio() },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(5000),
   });

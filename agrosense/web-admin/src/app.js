@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const { AsyncLocalStorage } = require("async_hooks");
 
 const app = express();
 app.set("view engine", "ejs");
@@ -29,6 +30,62 @@ const backupApi = axios.create({
   baseURL: BACKUP_URL,
   headers: process.env.BACKUP_API_TOKEN ? { "x-backup-token": process.env.BACKUP_API_TOKEN } : {},
 });
+
+// --- JWT hacia los microservicios ---
+// Los servicios rechazan peticiones sin token (ver services/*/src/verificarJWT.js).
+// requireAuth/requireBearerAuth guardan el JWT de la petición en "sesion" y estos
+// interceptores lo agregan como Authorization: Bearer a cada llamada de axios
+// hecha mientras se atiende esa petición, sin pasarlo a mano a cada función.
+// Si un servicio responde 401 de sesión (trae WWW-Authenticate: Bearer), se marca
+// la sesión como inválida y la respuesta al navegador se convierte en un cierre
+// de sesión (ver cerrarSesionSiInvalida).
+const sesion = new AsyncLocalStorage();
+
+for (const cliente of [axios, backupApi]) {
+  cliente.interceptors.request.use((config) => {
+    const actual = sesion.getStore();
+    if (actual) config.headers.Authorization = `Bearer ${actual.token}`;
+    return config;
+  });
+  cliente.interceptors.response.use(undefined, (err) => {
+    const actual = sesion.getStore();
+    const res = err.response;
+    if (actual && res && res.status === 401 && /^Bearer/i.test(res.headers["www-authenticate"] || "")) {
+      actual.invalida = true;
+    }
+    return Promise.reject(err);
+  });
+}
+
+function cerrarSesion(res) {
+  res.clearCookie("token");
+  res.clearCookie("usuario");
+}
+
+// Cada ruta atrapa sus errores y responde (render, json, redirect...). Si
+// mientras tanto algún servicio rechazó el token, esa respuesta se cambia por
+// "cerrar sesión y volver al login" (o 401 JSON para la app móvil).
+function cerrarSesionSiInvalida(req, res, comoJson) {
+  const enviar = res.send.bind(res);
+  const redirigir = res.redirect.bind(res);
+  const invalida = () => req.sesionStore.invalida;
+  const responderCierre = () => {
+    cerrarSesion(res);
+    if (!comoJson) return redirigir("/login?sesion=expirada");
+    res.set("WWW-Authenticate", 'Bearer realm="agrosense"');
+    res.status(401).type("json");
+    return enviar(JSON.stringify({ error: "La sesión ya no es válida: vuelve a iniciar sesión" }));
+  };
+  res.send = (...args) => (invalida() && !res.headersSent ? responderCierre() : enviar(...args));
+  res.redirect = (...args) => (invalida() && !res.headersSent ? responderCierre() : redirigir(...args));
+}
+
+// Entra (o vuelve a entrar) al contexto de la sesión. multer avisa que terminó
+// desde eventos del stream, donde ese contexto se pierde: por eso las rutas con
+// subida de archivos llaman de nuevo a conSesion dentro de su callback.
+function conSesion(req, res, next) {
+  sesion.run(req.sesionStore, next);
+}
 
 const AVATARS_DIR = path.join(__dirname, "../public/uploads/avatars");
 fs.mkdirSync(AVATARS_DIR, { recursive: true });
@@ -55,6 +112,8 @@ function requireAuth(req, res, next) {
   if (!token) return res.redirect("/login");
   try {
     req.usuario = jwt.verify(token, process.env.JWT_SECRET);
+    req.sesionStore = { token, invalida: false };
+    cerrarSesionSiInvalida(req, res, false);
     let perfil = {};
     try {
       perfil = JSON.parse(req.cookies.usuario || "{}");
@@ -62,12 +121,11 @@ function requireAuth(req, res, next) {
       perfil = {};
     }
     res.locals.usuario = { ...req.usuario, ...perfil };
-    next();
   } catch (err) {
-    res.clearCookie("token");
-    res.clearCookie("usuario");
-    res.redirect("/login");
+    cerrarSesion(res);
+    return res.redirect("/login");
   }
+  conSesion(req, res, next);
 }
 
 function requireAdmin(req, res, next) {
@@ -81,13 +139,17 @@ function requireAdmin(req, res, next) {
 function requireBearerAuth(req, res, next) {
   const authHeader = req.get("authorization") || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  res.set("WWW-Authenticate", 'Bearer realm="agrosense"');
   if (!token) return res.status(401).json({ error: "Falta el token de autenticación" });
   try {
     req.usuario = jwt.verify(token, process.env.JWT_SECRET);
-    next();
   } catch (err) {
     return res.status(401).json({ error: "Token inválido o expirado" });
   }
+  res.removeHeader("WWW-Authenticate");
+  req.sesionStore = { token, invalida: false };
+  cerrarSesionSiInvalida(req, res, true);
+  conSesion(req, res, next);
 }
 
 // Sube la foto de perfil desde la app móvil y reutiliza exactamente el
@@ -98,10 +160,12 @@ app.post(
   "/api/perfil/foto",
   requireBearerAuth,
   (req, res, next) => {
-    uploadAvatar.single("foto")(req, res, (err) => {
-      if (err) return res.status(400).json({ error: err.message });
-      next();
-    });
+    uploadAvatar.single("foto")(req, res, (err) =>
+      conSesion(req, res, () => {
+        if (err) return res.status(400).json({ error: err.message });
+        next();
+      })
+    );
   },
   async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Selecciona una imagen" });
@@ -121,7 +185,8 @@ app.post(
 app.get("/", (req, res) => res.redirect("/login"));
 
 app.get("/login", (req, res) => {
-  res.render("login", { error: null });
+  const error = req.query.sesion === "expirada" ? "Tu sesión expiró o ya no es válida. Vuelve a iniciar sesión." : null;
+  res.render("login", { error });
 });
 
 app.post("/login", async (req, res) => {
@@ -1180,10 +1245,12 @@ app.post(
   "/configuracion/foto",
   requireAuth,
   (req, res, next) => {
-    uploadAvatar.single("foto")(req, res, async (err) => {
-      if (err) return renderConfiguracion(req, res, { section: "foto", error: err.message });
-      next();
-    });
+    uploadAvatar.single("foto")(req, res, (err) =>
+      conSesion(req, res, () => {
+        if (err) return renderConfiguracion(req, res, { section: "foto", error: err.message });
+        next();
+      })
+    );
   },
   async (req, res) => {
     if (!req.file) {
@@ -1236,8 +1303,7 @@ app.post("/configuracion/contrasena", requireAuth, async (req, res) => {
 });
 
 app.get("/logout", (req, res) => {
-  res.clearCookie("token");
-  res.clearCookie("usuario");
+  cerrarSesion(res);
   res.redirect("/login");
 });
 

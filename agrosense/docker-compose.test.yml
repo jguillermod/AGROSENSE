@@ -5,6 +5,22 @@ version: "3.9"
 # Levantar:  docker compose -f docker-compose.test.yml up --build
 # Apagar:    docker compose -f docker-compose.test.yml down -v
 
+# Healthcheck común de los servicios Node (node:20-alpine trae el wget de busybox)
+x-node-healthcheck: &node-healthcheck
+  test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health > /dev/null || exit 1"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+
+# Secretos de autenticación: se interpolan desde .env (nunca se escriben aquí).
+# web-admin y auth solo necesitan JWT_SECRET; los que se llaman entre sí, también SERVICE_TOKEN.
+x-jwt-env: &jwt-env
+  JWT_SECRET: ${JWT_SECRET:?Falta JWT_SECRET en .env}
+x-servicio-env: &servicio-env
+  JWT_SECRET: ${JWT_SECRET:?Falta JWT_SECRET en .env}
+  SERVICE_TOKEN: ${SERVICE_TOKEN:?Falta SERVICE_TOKEN en .env}
+
 services:
   mysql-test:
     image: mariadb:11
@@ -29,7 +45,9 @@ services:
 
   auth-service-test:
     build: ./services/auth-service
+    healthcheck: *node-healthcheck
     env_file: .env.test
+    environment: *jwt-env
     ports:
       - "4001:3000"
     depends_on:
@@ -38,8 +56,10 @@ services:
 
   fincas-service-test:
     build: ./services/fincas-service
+    healthcheck: *node-healthcheck
     env_file: .env.test
     environment:
+      <<: *servicio-env
       SIMULATOR_SERVICE_URL: http://simulator-service-test:3000
     ports:
       - "4002:3000"
@@ -49,8 +69,10 @@ services:
 
   lecturas-service-test:
     build: ./services/lecturas-service
+    healthcheck: *node-healthcheck
     env_file: .env.test
     environment:
+      <<: *servicio-env
       SIMULATOR_SERVICE_URL: http://simulator-service-test:3000
     ports:
       - "4003:3000"
@@ -60,8 +82,10 @@ services:
 
   simulator-service-test:
     build: ./services/simulator-service
+    healthcheck: *node-healthcheck
     env_file: .env.test
     environment:
+      <<: *servicio-env
       FINCAS_SERVICE_URL: http://fincas-service-test:3000
       LECTURAS_SERVICE_URL: http://lecturas-service-test:3000
     ports:
@@ -78,7 +102,9 @@ services:
 
   backup-service-test:
     build: ./services/backup-service
+    healthcheck: *node-healthcheck
     env_file: .env.test
+    environment: *jwt-env
     ports:
       - "4005:3000"
     depends_on:
@@ -89,8 +115,10 @@ services:
 
   web-admin-test:
     build: ./web-admin
+    healthcheck: *node-healthcheck
     env_file: .env.test
     environment:
+      <<: *jwt-env
       BACKUP_SERVICE_URL: http://backup-service-test:3000
     ports:
       - "8090:3000"
@@ -100,7 +128,17 @@ services:
       - lecturas-service-test
       - backup-service-test
 
+  # Monitoreo de salud del ambiente de pruebas (URLs internas: http://auth-service-test:3000/health, ...)
+  uptime-kuma-test:
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    ports:
+      - "4010:3001"
+    volumes:
+      - uptime_test_data:/app/data
+
 volumes:
   mysql_test_data:
   simulator_test_data:
   backups_test_data:
+  uptime_test_data:

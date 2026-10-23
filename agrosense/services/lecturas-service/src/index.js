@@ -5,6 +5,8 @@ const crypto = require("crypto");
 const pool = require("./db");
 const alertas = require("./alertas");
 const clima = require("./clima");
+const { verificarJWT } = require("./verificarJWT");
+const { idPositivo, filtroParcelas, puedeGestionarParcela } = require("./permisos");
 
 const app = express();
 app.use(cors());
@@ -55,13 +57,25 @@ app.post("/api/lecturas", async (req, res) => {
   }
 });
 
+// --- De aquí en adelante (consultas de lecturas, alertas y clima) se exige JWT ---
+// La ingesta de arriba sigue usando solo la api_key de la estación.
+app.use(verificarJWT);
+
+const prohibido = (res) => res.status(403).json({ error: "No tienes esta parcela asignada" });
+
 // --- Lecturas en vivo (panel web) ---
-// Filtros opcionales comunes: parcela_id o finca_id. Se ordena por id
+// Filtros opcionales comunes: parcela_id o finca_id, siempre dentro de las
+// parcelas que el usuario puede ver (permisos.js). Se ordena por id
 // (orden de inserción) en vez de por fecha para usar la clave primaria y
 // no ordenar toda la tabla en cada consulta.
-function filtroUbicacion(query) {
+function filtroUbicacion(query, usuario) {
   const condiciones = [];
   const params = [];
+  const permiso = filtroParcelas(usuario, "p.id");
+  if (permiso) {
+    condiciones.push(permiso.sql);
+    params.push(...permiso.params);
+  }
   const parcelaId = Number(query.parcela_id);
   const fincaId = Number(query.finca_id);
   if (Number.isInteger(parcelaId) && parcelaId > 0) {
@@ -81,7 +95,7 @@ const limite = (valor, porDefecto, maximo) => Math.min(maximo, Math.max(1, Numbe
 // parcela (para colorear cada valor en el cliente).
 app.get("/api/lecturas/recientes", async (req, res) => {
   try {
-    const { where, params } = filtroUbicacion(req.query);
+    const { where, params } = filtroUbicacion(req.query, req.usuario);
     const [rows] = await pool.query(
       `SELECT l.id, l.estacion_id, e.codigo AS estacion_codigo,
               p.id AS parcela_id, p.nombre AS parcela_nombre,
@@ -111,7 +125,7 @@ app.get("/api/lecturas/recientes", async (req, res) => {
 const EXPORT_MAX = 100000;
 app.get("/api/lecturas/exportar", async (req, res) => {
   try {
-    const { where, params } = filtroUbicacion(req.query);
+    const { where, params } = filtroUbicacion(req.query, req.usuario);
     const condiciones = where ? [where.replace(/^WHERE /, "")] : [];
     if (/^\d{4}-\d{2}-\d{2}$/.test(req.query.desde || "")) {
       condiciones.push("l.fecha >= ?");
@@ -144,6 +158,9 @@ app.get("/api/lecturas/exportar", async (req, res) => {
 
 // Historial de lecturas por estación (RF-05)
 app.get("/api/estaciones/:estacionId/lecturas", async (req, res) => {
+  const [[estacion]] = await pool.query("SELECT parcela_id FROM estaciones WHERE id = ?", [req.params.estacionId]);
+  if (!estacion) return res.status(404).json({ error: "Estación no encontrada" });
+  if (!(await puedeGestionarParcela(req.usuario, estacion.parcela_id))) return prohibido(res);
   const [rows] = await pool.query(
     "SELECT * FROM lecturas WHERE estacion_id = ? ORDER BY fecha DESC LIMIT 200",
     [req.params.estacionId]
@@ -152,21 +169,10 @@ app.get("/api/estaciones/:estacionId/lecturas", async (req, res) => {
 });
 
 // --- Registros manuales de campo (humedad/temperatura a ojo + anotaciones) ---
-// Puede registrar el admin (en cualquier parcela) o quien tenga esa
-// parcela asignada en usuario_parcelas (agrónomo, o cualquier usuario al
-// que se la hayan asignado).
-async function puedeRegistrarEnParcela(usuarioId, parcelaId) {
-  const [usuarios] = await pool.query("SELECT rol FROM usuarios WHERE id = ?", [usuarioId]);
-  if (usuarios.length === 0) return false;
-  if (usuarios[0].rol !== "agronomo") return true; // admin/agricultor: mismo acceso amplio que ya tienen sobre parcelas
-  const [asignaciones] = await pool.query(
-    "SELECT 1 FROM usuario_parcelas WHERE usuario_id = ? AND parcela_id = ?",
-    [usuarioId, parcelaId]
-  );
-  return asignaciones.length > 0;
-}
-
+// Puede registrar quien puede gestionar la parcela (permisos.js); el autor es
+// siempre el usuario del JWT, no un usuario_id que mande el cliente.
 app.get("/api/parcelas/:parcelaId/registros", async (req, res) => {
+  if (!(await puedeGestionarParcela(req.usuario, idPositivo(req.params.parcelaId)))) return prohibido(res);
   const [rows] = await pool.query(
     `SELECT r.*, u.nombre AS usuario_nombre
      FROM registros_manuales r
@@ -181,9 +187,9 @@ app.get("/api/parcelas/:parcelaId/registros", async (req, res) => {
 
 app.post("/api/parcelas/:parcelaId/registros", async (req, res) => {
   const parcelaId = Number(req.params.parcelaId);
-  const { usuario_id, humedad_suelo, temperatura, anotaciones } = req.body;
+  const usuario_id = req.usuario.id;
+  const { humedad_suelo, temperatura, anotaciones } = req.body;
 
-  if (!usuario_id) return res.status(400).json({ error: "Falta usuario_id" });
   const sinValores = humedad_suelo === undefined && temperatura === undefined;
   const sinAnotacion = !anotaciones || !String(anotaciones).trim();
   if (sinValores && sinAnotacion) {
@@ -191,10 +197,7 @@ app.post("/api/parcelas/:parcelaId/registros", async (req, res) => {
   }
 
   try {
-    const permitido = await puedeRegistrarEnParcela(usuario_id, parcelaId);
-    if (!permitido) {
-      return res.status(403).json({ error: "No tienes esta parcela asignada" });
-    }
+    if (!(await puedeGestionarParcela(req.usuario, parcelaId))) return prohibido(res);
 
     const [result] = await pool.query(
       `INSERT INTO registros_manuales (parcela_id, usuario_id, humedad_suelo, temperatura, anotaciones)

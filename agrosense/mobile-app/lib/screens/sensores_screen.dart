@@ -224,6 +224,8 @@ class _SensoresScreenState extends State<SensoresScreen> {
       floatingActionButton: !_esAdmin
           ? null
           : FloatingActionButton.extended(
+            // varias pestañas del menú viven a la vez (IndexedStack): sin tag propio chocan al navegar
+            heroTag: null,
               onPressed: _vincularSensor,
               icon: const Icon(Icons.link),
               label: const Text('Vincular sensor'),

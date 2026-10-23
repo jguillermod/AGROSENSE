@@ -11,6 +11,7 @@
 // el ciclo de vida queda en un solo lugar.
 
 const pool = require("./db");
+const { idPositivo, filtroParcelas, aplicarFiltro, puedeGestionarParcela } = require("./permisos");
 
 const CATEGORIAS = ["sensor", "climatica"];
 const SEVERIDADES = ["info", "media", "alta"];
@@ -24,31 +25,9 @@ const SENSOR = {
   helada: "Riesgo de helada",
 };
 
-const idPositivo = (valor) => {
-  const n = Number(valor);
-  return Number.isInteger(n) && n > 0 ? n : null;
-};
 const redondear = (v) => Math.round(Number(v) * 10) / 10;
 
-// --- Permisos (igual que cultivos y riego en fincas-service) ---
-
-async function esAgronomo(usuarioId) {
-  if (!usuarioId) return false;
-  const [rows] = await pool.query("SELECT rol FROM usuarios WHERE id = ?", [usuarioId]);
-  return rows.length > 0 && rows[0].rol === "agronomo";
-}
-
-async function puedeGestionarParcela(usuarioId, parcelaId) {
-  if (!usuarioId) return true;
-  const [usuarios] = await pool.query("SELECT rol FROM usuarios WHERE id = ?", [usuarioId]);
-  if (usuarios.length === 0) return false;
-  if (usuarios[0].rol !== "agronomo") return true;
-  const [asignaciones] = await pool.query(
-    "SELECT 1 FROM usuario_parcelas WHERE usuario_id = ? AND parcela_id = ?",
-    [usuarioId, parcelaId]
-  );
-  return asignaciones.length > 0;
-}
+// Permisos: permisos.js (los mismos que en fincas-service), con el usuario del JWT.
 
 // --- Abrir / actualizar / resolver ---
 
@@ -178,12 +157,11 @@ const SELECT_ALERTAS = `
   LEFT JOIN estaciones e ON e.id = a.estacion_id
   LEFT JOIN usuarios u ON u.id = a.atendida_por`;
 
-async function filtrosAlertas(query) {
+function filtrosAlertas(query, usuario) {
   const condiciones = [];
   const params = [];
   const parcelaId = idPositivo(query.parcela_id);
   const fincaId = idPositivo(query.finca_id);
-  const usuarioId = idPositivo(query.usuario_id);
   if (parcelaId) {
     condiciones.push("a.parcela_id = ?");
     params.push(parcelaId);
@@ -214,19 +192,16 @@ async function filtrosAlertas(query) {
     condiciones.push("a.fecha < ? + INTERVAL 1 DAY");
     params.push(`${query.hasta} 00:00:00`);
   }
-  if (await esAgronomo(usuarioId)) {
-    condiciones.push("a.parcela_id IN (SELECT parcela_id FROM usuario_parcelas WHERE usuario_id = ?)");
-    params.push(usuarioId);
-  }
+  aplicarFiltro(filtroParcelas(usuario, "a.parcela_id"), condiciones, params);
   return { where: condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "", params };
 }
 
 function registrarRutas(app) {
   // Listado con filtros: parcela_id, finca_id, categoria, severidad,
-  // estado (activa | atendida | resuelta | vigentes), desde, hasta, usuario_id, limit
+  // estado (activa | atendida | resuelta | vigentes), desde, hasta, limit (solo parcelas del usuario)
   app.get("/api/alertas", async (req, res) => {
     try {
-      const { where, params } = await filtrosAlertas(req.query);
+      const { where, params } = filtrosAlertas(req.query, req.usuario);
       const limite = Math.min(10000, Math.max(1, Number(req.query.limit) || 200));
       const [rows] = await pool.query(
         `${SELECT_ALERTAS} ${where}
@@ -245,7 +220,7 @@ function registrarRutas(app) {
   // Conteo de alertas activas (sin atender) por severidad, para insignias y dashboard
   app.get("/api/alertas/conteo", async (req, res) => {
     try {
-      const { where, params } = await filtrosAlertas({ ...req.query, estado: "vigentes", severidad: undefined });
+      const { where, params } = filtrosAlertas({ ...req.query, estado: "vigentes", severidad: undefined }, req.usuario);
       const [rows] = await pool.query(
         `SELECT a.estado, a.severidad, COUNT(*) AS total FROM alertas a JOIN parcelas p ON p.id = a.parcela_id
          ${where} GROUP BY a.estado, a.severidad`,
@@ -270,12 +245,11 @@ function registrarRutas(app) {
   // Marcar como atendida: alguien la vio y se hace cargo. Sigue vigente (se
   // sigue actualizando) hasta que la condición termine y se resuelva sola.
   app.put("/api/alertas/:id/atender", async (req, res) => {
-    const usuarioId = idPositivo(req.body.usuario_id);
-    if (!usuarioId) return res.status(400).json({ error: "Falta usuario_id" });
+    const usuarioId = req.usuario.id;
     try {
       const [rows] = await pool.query("SELECT parcela_id, estado FROM alertas WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Alerta no encontrada" });
-      if (!(await puedeGestionarParcela(usuarioId, rows[0].parcela_id))) {
+      if (!(await puedeGestionarParcela(req.usuario, rows[0].parcela_id))) {
         return res.status(403).json({ error: "No tienes esta parcela asignada" });
       }
       if (rows[0].estado !== "activa") {
@@ -295,10 +269,10 @@ function registrarRutas(app) {
   // Panel "Lecturas en vivo": con vigentes=1 solo las que siguen abiertas
   app.get("/api/alertas/recientes", async (req, res) => {
     try {
-      const { where, params } = await filtrosAlertas({
-        ...req.query,
-        estado: req.query.vigentes === "1" ? "vigentes" : req.query.estado,
-      });
+      const { where, params } = filtrosAlertas(
+        { ...req.query, estado: req.query.vigentes === "1" ? "vigentes" : req.query.estado },
+        req.usuario
+      );
       const limite = Math.min(200, Math.max(1, Number(req.query.limit) || 20));
       const [rows] = await pool.query(
         `${SELECT_ALERTAS} ${where} ORDER BY COALESCE(a.ultima_lectura_en, a.fecha) DESC, a.id DESC LIMIT ?`,
@@ -315,8 +289,11 @@ function registrarRutas(app) {
   // las vigentes; ?estado=todas para el historial completo
   app.get("/api/parcelas/:parcelaId/alertas", async (req, res) => {
     try {
+      if (!(await puedeGestionarParcela(req.usuario, idPositivo(req.params.parcelaId)))) {
+        return res.status(403).json({ error: "No tienes esta parcela asignada" });
+      }
       const estado = req.query.estado === "todas" ? undefined : req.query.estado || "vigentes";
-      const { where, params } = await filtrosAlertas({ ...req.query, parcela_id: req.params.parcelaId, estado });
+      const { where, params } = filtrosAlertas({ ...req.query, parcela_id: req.params.parcelaId, estado }, req.usuario);
       const [rows] = await pool.query(
         `${SELECT_ALERTAS} ${where} ORDER BY COALESCE(a.ultima_lectura_en, a.fecha) DESC LIMIT 100`,
         params
@@ -329,4 +306,4 @@ function registrarRutas(app) {
   });
 }
 
-module.exports = { abrirOActualizar, resolver, evaluarLectura, registrarRutas, puedeGestionarParcela };
+module.exports = { abrirOActualizar, resolver, evaluarLectura, registrarRutas };

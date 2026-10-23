@@ -197,6 +197,8 @@ class _ParcelasScreenState extends State<ParcelasScreen> {
       floatingActionButton: _fincaActiva == null
           ? null
           : FloatingActionButton(
+            // varias pestañas del menú viven a la vez (IndexedStack): sin tag propio chocan al navegar
+            heroTag: null,
               onPressed: () => _abrirFormulario(),
               child: const Icon(Icons.add),
             ),

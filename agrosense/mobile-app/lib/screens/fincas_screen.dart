@@ -127,6 +127,8 @@ class _FincasScreenState extends State<FincasScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Fincas')),
       floatingActionButton: FloatingActionButton(
+        // varias pestañas del menú viven a la vez (IndexedStack): sin tag propio chocan al navegar
+        heroTag: null,
         onPressed: () => _abrirFormulario(),
         child: const Icon(Icons.add),
       ),

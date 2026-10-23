@@ -388,6 +388,8 @@ class _MisParcelasScreenState extends State<MisParcelasScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Mis parcelas')),
       floatingActionButton: FloatingActionButton(
+        // varias pestañas del menú viven a la vez (IndexedStack): sin tag propio chocan al navegar
+        heroTag: null,
         onPressed: _mostrarMenuAcciones,
         child: const Icon(Icons.add),
       ),

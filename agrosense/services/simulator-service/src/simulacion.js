@@ -24,6 +24,8 @@ const { prepararDatosDemo, leerUmbrales } = require("./seed");
 const { RelojSimulado } = require("./reloj");
 const { ClimaSimulado } = require("./clima");
 
+const { cabeceraServicio } = require("./verificarJWT");
+
 const LECTURAS_URL = process.env.LECTURAS_SERVICE_URL || "http://lecturas-service:3000";
 const FINCAS_URL = process.env.FINCAS_SERVICE_URL || "http://fincas-service:3000";
 const ESCENARIOS = ["normal", "sequia", "ola_calor", "exceso_lluvia"];
@@ -157,7 +159,10 @@ class Simulador {
   // Parcelas que el motor de riego (fincas-service) está regando ahora
   async leerRiegosActivos() {
     try {
-      const res = await fetch(`${FINCAS_URL}/api/riego/activos`, { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(`${FINCAS_URL}/api/riego/activos`, {
+        headers: cabeceraServicio(),
+        signal: AbortSignal.timeout(3000),
+      });
       if (!res.ok) throw new Error(`fincas-service respondió ${res.status}`);
       this.regando = new Set((await res.json()).map((r) => r.parcela_id));
     } catch (err) {

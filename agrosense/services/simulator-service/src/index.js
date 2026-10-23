@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const { Simulador, ESCENARIOS } = require("./simulacion");
 const { TIPOS_EVENTO } = require("./clima");
+const { verificarJWT, verificarJWTOServicio, soloAdmin } = require("./verificarJWT");
 
 const numeroEnv = (nombre, porDefecto) => {
   const valor = Number(process.env[nombre]);
@@ -31,19 +32,26 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "simulator-service" });
 });
 
-app.get("/status", (req, res) => {
+// Permisos: /health es público; /reloj y GET /clima los consultan otros
+// servicios (X-Service-Token) o un usuario con sesión; todo lo demás es el
+// control de la simulación y exige el JWT de un admin.
+const usuarioOServicio = verificarJWTOServicio;
+const adminOServicio = [verificarJWTOServicio, soloAdmin];
+const admin = [verificarJWT, soloAdmin];
+
+app.get("/status", admin, (req, res) => {
   res.json(simulador.status());
 });
 
 // Clima actual, pronóstico de 24 h simuladas y eventos programados
-app.get("/clima", (req, res) => {
+app.get("/clima", adminOServicio, (req, res) => {
   res.json(simulador.climaPublico());
 });
 
 // Evento de clima a mano: {"tipo": "lluvia"|"helada"|"ola_calor"|"viento",
 // "duracion_horas": N, "en_horas": M (opcional, para que primero aparezca
 // en el pronóstico)}. Las horas son simuladas.
-app.post("/clima/evento", (req, res) => {
+app.post("/clima/evento", admin, (req, res) => {
   const { tipo } = req.body || {};
   const duracion = Number((req.body || {}).duracion_horas);
   const enHoras = Number((req.body || {}).en_horas || 0);
@@ -61,22 +69,22 @@ app.post("/clima/evento", (req, res) => {
 });
 
 // Cancela los eventos de clima en curso y los programados
-app.delete("/clima/eventos", (req, res) => {
+app.delete("/clima/eventos", admin, (req, res) => {
   res.json({ ok: true, eliminados: simulador.clima.limpiar() });
 });
 
 // Activa o desactiva los eventos aleatorios: {"activo": true|false}
-app.post("/clima/aleatorio", (req, res) => {
+app.post("/clima/aleatorio", admin, (req, res) => {
   simulador.clima.aleatorios = (req.body || {}).activo !== false;
   res.json({ ok: true, eventos_aleatorios: simulador.clima.aleatorios });
 });
 
 // Hora simulada para el motor de riego de fincas-service
-app.get("/reloj", (req, res) => {
+app.get("/reloj", usuarioOServicio, (req, res) => {
   res.json(simulador.relojPublico());
 });
 
-app.post("/scenario", (req, res) => {
+app.post("/scenario", admin, (req, res) => {
   const { nombre } = req.body || {};
   if (!ESCENARIOS.includes(nombre)) {
     return res.status(400).json({ error: `Escenario inválido. Usa uno de: ${ESCENARIOS.join(", ")}` });
@@ -85,17 +93,17 @@ app.post("/scenario", (req, res) => {
   res.json({ ok: true, escenario: nombre });
 });
 
-app.post("/pause", (req, res) => {
+app.post("/pause", admin, (req, res) => {
   simulador.pausar();
   res.json({ ok: true, estado: simulador.status().estado });
 });
 
-app.post("/resume", (req, res) => {
+app.post("/resume", admin, (req, res) => {
   simulador.reanudar();
   res.json({ ok: true, estado: simulador.status().estado });
 });
 
-app.post("/speed", (req, res) => {
+app.post("/speed", admin, (req, res) => {
   const intervalo = Number((req.body || {}).intervalo);
   if (!Number.isFinite(intervalo) || intervalo < INTERVALO_MIN || intervalo > INTERVALO_MAX) {
     return res

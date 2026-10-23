@@ -4,20 +4,21 @@ import 'package:intl/intl.dart';
 
 import '../config/api_config.dart';
 import '../models/models.dart';
+import 'api_client.dart';
 import 'api_exception.dart';
 
 /// Consume fincas-service (fincas/parcelas/estaciones/sensores/dashboard)
 /// y lecturas-service (historial de lecturas y alertas). Los mismos
 /// endpoints REST que usa el panel web, llamados directo desde el
-/// celular (ninguno de ellos exige sesión: la app confía en que solo
-/// quien inició sesión llega a estas pantallas).
+/// celular con el JWT de la sesión (ver ApiClient): los servicios
+/// rechazan las peticiones sin token y aplican los permisos por rol.
 class DataService {
   static const _jsonHeaders = {'Content-Type': 'application/json'};
 
   // --- Fincas ---
 
   Future<List<Finca>> getFincas() async {
-    final res = await http.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/fincas'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/fincas'));
     _checkOk(res, 'No se pudieron cargar las fincas');
     final List<dynamic> data = jsonDecode(res.body);
     return data.map((e) => Finca.fromJson(e as Map<String, dynamic>)).toList();
@@ -26,7 +27,7 @@ class DataService {
   /// Devuelve el id de la finca creada (el backend ya lo entrega en la
   /// respuesta, así que no hace falta un segundo viaje a buscarlo).
   Future<int> crearFinca({required String nombre, String? ubicacion, required int usuarioId}) async {
-    final res = await http.post(
+    final res = await ApiClient.post(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/fincas'),
       headers: _jsonHeaders,
       body: jsonEncode({'nombre': nombre, 'ubicacion': ubicacion, 'usuario_id': usuarioId}),
@@ -37,7 +38,7 @@ class DataService {
   }
 
   Future<void> editarFinca(int id, {required String nombre, String? ubicacion}) async {
-    final res = await http.put(
+    final res = await ApiClient.put(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/fincas/$id'),
       headers: _jsonHeaders,
       body: jsonEncode({'nombre': nombre, 'ubicacion': ubicacion}),
@@ -46,14 +47,14 @@ class DataService {
   }
 
   Future<void> eliminarFinca(int id) async {
-    final res = await http.delete(Uri.parse('${ApiConfig.fincasBaseUrl}/api/fincas/$id'));
+    final res = await ApiClient.delete(Uri.parse('${ApiConfig.fincasBaseUrl}/api/fincas/$id'));
     _checkOk(res, 'No se pudo eliminar la finca');
   }
 
   // --- Parcelas ---
 
   Future<List<Parcela>> getParcelas(int fincaId) async {
-    final res = await http.get(
+    final res = await ApiClient.get(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/fincas/$fincaId/parcelas'),
     );
     _checkOk(res, 'No se pudieron cargar las parcelas');
@@ -63,7 +64,7 @@ class DataService {
 
   /// Todas las parcelas de todas las fincas (para selects/checklists).
   Future<List<ParcelaResumen>> getParcelasFlat() async {
-    final res = await http.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas'));
     _checkOk(res, 'No se pudieron cargar las parcelas');
     final List<dynamic> data = jsonDecode(res.body);
     return data.map((e) => ParcelaResumen.fromJson(e as Map<String, dynamic>)).toList();
@@ -78,7 +79,7 @@ class DataService {
     required double humedadMax,
     required double temperaturaMax,
   }) async {
-    final res = await http.post(
+    final res = await ApiClient.post(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas'),
       headers: _jsonHeaders,
       body: jsonEncode({
@@ -101,7 +102,7 @@ class DataService {
     required double humedadMax,
     required double temperaturaMax,
   }) async {
-    final res = await http.put(
+    final res = await ApiClient.put(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$id'),
       headers: _jsonHeaders,
       body: jsonEncode({
@@ -115,7 +116,7 @@ class DataService {
   }
 
   Future<void> eliminarParcela(int id) async {
-    final res = await http.delete(Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$id'));
+    final res = await ApiClient.delete(Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$id'));
     _checkOk(res, 'No se pudo eliminar la parcela');
   }
 
@@ -123,7 +124,7 @@ class DataService {
   /// [getParcelas], no está acotado a una finca -- trae de todas las
   /// fincas, pero solo las que el admin le asignó en usuario_parcelas.
   Future<List<Parcela>> getParcelasAsignadas(int usuarioId) async {
-    final res = await http.get(
+    final res = await ApiClient.get(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/usuarios/$usuarioId/parcelas'),
     );
     _checkOk(res, 'No se pudieron cargar tus parcelas');
@@ -134,7 +135,7 @@ class DataService {
   // --- Sensores / estaciones ---
 
   Future<List<Estacion>> getEstaciones(int parcelaId) async {
-    final res = await http.get(
+    final res = await ApiClient.get(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/estaciones'),
     );
     _checkOk(res, 'No se pudieron cargar los sensores');
@@ -144,14 +145,14 @@ class DataService {
 
   /// Todos los sensores (de todas las parcelas), con su última lectura.
   Future<List<Estacion>> getEstacionesFlat() async {
-    final res = await http.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/estaciones'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/estaciones'));
     _checkOk(res, 'No se pudieron cargar los sensores');
     final List<dynamic> data = jsonDecode(res.body);
     return data.map((e) => Estacion.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<void> editarEstacion(int id, {required String codigo}) async {
-    final res = await http.put(
+    final res = await ApiClient.put(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/estaciones/$id'),
       headers: _jsonHeaders,
       body: jsonEncode({'codigo': codigo}),
@@ -160,14 +161,14 @@ class DataService {
   }
 
   Future<void> eliminarEstacion(int id) async {
-    final res = await http.delete(Uri.parse('${ApiConfig.fincasBaseUrl}/api/estaciones/$id'));
+    final res = await ApiClient.delete(Uri.parse('${ApiConfig.fincasBaseUrl}/api/estaciones/$id'));
     _checkOk(res, 'No se pudo eliminar el sensor');
   }
 
   // --- Tokens de vinculación de sensores ---
 
   Future<SensorToken> generarTokenSensor(int parcelaId) async {
-    final res = await http.post(
+    final res = await ApiClient.post(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/sensores/tokens'),
       headers: _jsonHeaders,
       body: jsonEncode({'parcela_id': parcelaId}),
@@ -177,21 +178,21 @@ class DataService {
   }
 
   Future<List<SensorToken>> getTokensSensor() async {
-    final res = await http.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/sensores/tokens'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/sensores/tokens'));
     _checkOk(res, 'No se pudieron cargar los tokens');
     final List<dynamic> data = jsonDecode(res.body);
     return data.map((e) => SensorToken.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<void> revocarTokenSensor(int id) async {
-    final res = await http.delete(Uri.parse('${ApiConfig.fincasBaseUrl}/api/sensores/tokens/$id'));
+    final res = await ApiClient.delete(Uri.parse('${ApiConfig.fincasBaseUrl}/api/sensores/tokens/$id'));
     _checkOk(res, 'No se pudo revocar el token');
   }
 
   // --- Alertas y lecturas ---
 
   Future<List<Alerta>> getAlertas(int parcelaId) async {
-    final res = await http.get(
+    final res = await ApiClient.get(
       Uri.parse('${ApiConfig.lecturasBaseUrl}/api/parcelas/$parcelaId/alertas'),
     );
     _checkOk(res, 'No se pudieron cargar las alertas');
@@ -208,20 +209,20 @@ class DataService {
       'severidad': ?severidad,
       'estado': ?estado,
     };
-    final res = await http.get(Uri.parse('${ApiConfig.lecturasBaseUrl}/api/alertas').replace(queryParameters: query));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.lecturasBaseUrl}/api/alertas').replace(queryParameters: query));
     _checkOk(res, 'No se pudieron cargar las alertas');
     final List<dynamic> data = jsonDecode(res.body);
     return data.map((e) => Alerta.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<AlertasConteo> getConteoAlertas({required int usuarioId}) async {
-    final res = await http.get(Uri.parse('${ApiConfig.lecturasBaseUrl}/api/alertas/conteo?usuario_id=$usuarioId'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.lecturasBaseUrl}/api/alertas/conteo?usuario_id=$usuarioId'));
     _checkOk(res, 'No se pudieron contar las alertas');
     return AlertasConteo.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   Future<void> atenderAlerta(int id, {required int usuarioId}) async {
-    final res = await http.put(
+    final res = await ApiClient.put(
       Uri.parse('${ApiConfig.lecturasBaseUrl}/api/alertas/$id/atender'),
       headers: _jsonHeaders,
       body: jsonEncode({'usuario_id': usuarioId}),
@@ -230,7 +231,7 @@ class DataService {
   }
 
   Future<Clima> getClima() async {
-    final res = await http.get(Uri.parse('${ApiConfig.lecturasBaseUrl}/api/clima'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.lecturasBaseUrl}/api/clima'));
     _checkOk(res, 'No hay datos de clima');
     return Clima.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
@@ -238,7 +239,7 @@ class DataService {
   // --- Registros manuales de campo (humedad/temperatura + anotaciones) ---
 
   Future<List<RegistroManual>> getRegistros(int parcelaId) async {
-    final res = await http.get(
+    final res = await ApiClient.get(
       Uri.parse('${ApiConfig.lecturasBaseUrl}/api/parcelas/$parcelaId/registros'),
     );
     _checkOk(res, 'No se pudieron cargar los registros');
@@ -253,7 +254,7 @@ class DataService {
     double? temperatura,
     String? anotaciones,
   }) async {
-    final res = await http.post(
+    final res = await ApiClient.post(
       Uri.parse('${ApiConfig.lecturasBaseUrl}/api/parcelas/$parcelaId/registros'),
       headers: _jsonHeaders,
       body: jsonEncode({
@@ -267,7 +268,7 @@ class DataService {
   }
 
   Future<List<Lectura>> getLecturas(int estacionId) async {
-    final res = await http.get(
+    final res = await ApiClient.get(
       Uri.parse('${ApiConfig.lecturasBaseUrl}/api/estaciones/$estacionId/lecturas'),
     );
     _checkOk(res, 'No se pudo cargar el historial');
@@ -278,7 +279,7 @@ class DataService {
   // --- Asignación de parcelas a usuarios ---
 
   Future<List<Asignacion>> getAsignaciones() async {
-    final res = await http.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/asignaciones'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/asignaciones'));
     _checkOk(res, 'No se pudieron cargar las asignaciones');
     final List<dynamic> data = jsonDecode(res.body);
     return data.map((e) => Asignacion.fromJson(e as Map<String, dynamic>)).toList();
@@ -289,14 +290,14 @@ class DataService {
   /// ya tiene antes de agregarse una nueva sin perder las anteriores,
   /// ya que [setAsignaciones] reemplaza el conjunto completo.
   Future<List<Asignacion>> getAsignacionesUsuario(int usuarioId) async {
-    final res = await http.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/asignaciones/$usuarioId'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/asignaciones/$usuarioId'));
     _checkOk(res, 'No se pudieron cargar tus asignaciones');
     final List<dynamic> data = jsonDecode(res.body);
     return data.map((e) => Asignacion.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<void> setAsignaciones(int usuarioId, List<int> parcelaIds) async {
-    final res = await http.put(
+    final res = await ApiClient.put(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/asignaciones/$usuarioId'),
       headers: _jsonHeaders,
       body: jsonEncode({'parcela_ids': parcelaIds}),
@@ -311,7 +312,7 @@ class DataService {
   static final _formatoFecha = DateFormat('yyyy-MM-dd');
 
   Future<List<Cultivo>> getCultivosParcela(int parcelaId, {required int usuarioId}) async {
-    final res = await http.get(
+    final res = await ApiClient.get(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/cultivos?usuario_id=$usuarioId'),
     );
     _checkOk(res, 'No se pudieron cargar los cultivos');
@@ -347,14 +348,14 @@ class DataService {
     });
 
     if (id == null) {
-      final res = await http.post(
+      final res = await ApiClient.post(
         Uri.parse('${ApiConfig.fincasBaseUrl}/api/cultivos'),
         headers: _jsonHeaders,
         body: body,
       );
       _checkCreated(res, 'No se pudo crear el cultivo');
     } else {
-      final res = await http.put(
+      final res = await ApiClient.put(
         Uri.parse('${ApiConfig.fincasBaseUrl}/api/cultivos/$id'),
         headers: _jsonHeaders,
         body: body,
@@ -364,7 +365,7 @@ class DataService {
   }
 
   Future<void> eliminarCultivo(int id, {required int usuarioId}) async {
-    final res = await http.delete(
+    final res = await ApiClient.delete(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/cultivos/$id?usuario_id=$usuarioId'),
     );
     _checkOk(res, 'No se pudo eliminar el cultivo');
@@ -375,7 +376,7 @@ class DataService {
   // las parcelas que un agrónomo no tenga asignadas.
 
   Future<RiegoResumen> getRiegoParcela(int parcelaId, {required int usuarioId}) async {
-    final res = await http.get(
+    final res = await ApiClient.get(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/riego?usuario_id=$usuarioId'),
     );
     _checkOk(res, 'No se pudo cargar el riego de la parcela');
@@ -383,7 +384,7 @@ class DataService {
   }
 
   Future<void> regarAhora(int parcelaId, {required int duracionMinutos, required int usuarioId}) async {
-    final res = await http.post(
+    final res = await ApiClient.post(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/riego/iniciar'),
       headers: _jsonHeaders,
       body: jsonEncode({'duracion_minutos': duracionMinutos, 'usuario_id': usuarioId}),
@@ -392,7 +393,7 @@ class DataService {
   }
 
   Future<void> detenerRiego(int parcelaId, {required int usuarioId}) async {
-    final res = await http.post(
+    final res = await ApiClient.post(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/riego/detener'),
       headers: _jsonHeaders,
       body: jsonEncode({'usuario_id': usuarioId}),
@@ -401,7 +402,7 @@ class DataService {
   }
 
   Future<void> setRiegoAutomatico(int parcelaId, {required bool activo, required int usuarioId}) async {
-    final res = await http.put(
+    final res = await ApiClient.put(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/parcelas/$parcelaId/riego-automatico'),
       headers: _jsonHeaders,
       body: jsonEncode({'activo': activo, 'usuario_id': usuarioId}),
@@ -415,13 +416,13 @@ class DataService {
   /// limita a sus parcelas asignadas (el resto del resumen es general).
   Future<DashboardResumen> getDashboardResumen({int? usuarioId}) async {
     final query = usuarioId != null ? '?usuario_id=$usuarioId' : '';
-    final res = await http.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/dashboard/resumen$query'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.fincasBaseUrl}/api/dashboard/resumen$query'));
     _checkOk(res, 'No se pudo cargar el resumen');
     return DashboardResumen.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   Future<List<HistorialPunto>> getDashboardHistorial({int dias = 7}) async {
-    final res = await http.get(
+    final res = await ApiClient.get(
       Uri.parse('${ApiConfig.fincasBaseUrl}/api/dashboard/humedad-historial?dias=$dias'),
     );
     _checkOk(res, 'No se pudo cargar el historial de humedad');

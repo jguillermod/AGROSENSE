@@ -8,7 +8,7 @@
 
 const pool = require("./db");
 const reloj = require("./reloj");
-const { idPositivo, esAgronomo, puedeGestionarParcela } = require("./permisos");
+const { idPositivo, filtroParcelas, aplicarFiltro, puedeGestionarParcela } = require("./permisos");
 
 const DIA_POR_INDICE = ["D", "L", "M", "X", "J", "V", "S"]; // índice = getUTCDay()
 const ORDEN_DIAS = ["L", "M", "X", "J", "V", "S", "D"];
@@ -116,22 +116,16 @@ async function ahoraOpcional() {
   }
 }
 
-// Condición extra para que un agrónomo solo vea sus parcelas asignadas
-async function filtroAgronomo(usuarioId, columna, condiciones, params) {
-  if (await esAgronomo(usuarioId)) {
-    condiciones.push(`${columna} IN (SELECT parcela_id FROM usuario_parcelas WHERE usuario_id = ?)`);
-    params.push(usuarioId);
-  }
-}
-
-async function listarProgramaciones({ parcelaId, usuarioId }) {
+// usuario (req.usuario) es opcional: sin él no se filtra (el motor y las
+// rutas que ya validaron la parcela con puedeGestionarParcela)
+async function listarProgramaciones({ parcelaId, usuario }) {
   const condiciones = [];
   const params = [];
   if (parcelaId) {
     condiciones.push("rp.parcela_id = ?");
     params.push(parcelaId);
   }
-  await filtroAgronomo(usuarioId, "rp.parcela_id", condiciones, params);
+  if (usuario) aplicarFiltro(filtroParcelas(usuario, "rp.parcela_id"), condiciones, params);
   const where = condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "";
   const [rows] = await pool.query(
     `${SELECT_PROGRAMACIONES} ${where} ORDER BY f.nombre, p.nombre, rp.hora_inicio, rp.id`,
@@ -141,7 +135,7 @@ async function listarProgramaciones({ parcelaId, usuarioId }) {
   return rows.map((r) => formatearProgramacion(r, ahora));
 }
 
-async function listarEventos({ parcelaId, fincaId, desde, hasta, estado, origen, usuarioId, limite = 100 }) {
+async function listarEventos({ parcelaId, fincaId, desde, hasta, estado, origen, usuario, limite = 100 }) {
   const condiciones = [];
   const params = [];
   if (parcelaId) {
@@ -168,7 +162,7 @@ async function listarEventos({ parcelaId, fincaId, desde, hasta, estado, origen,
     condiciones.push("r.origen = ?");
     params.push(origen);
   }
-  await filtroAgronomo(usuarioId, "r.parcela_id", condiciones, params);
+  if (usuario) aplicarFiltro(filtroParcelas(usuario, "r.parcela_id"), condiciones, params);
   const where = condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "";
   const [rows] = await pool.query(`${SELECT_EVENTOS} ${where} ORDER BY r.inicio DESC, r.id DESC LIMIT ?`, [
     ...params,
@@ -396,7 +390,7 @@ function registrarRutas(app) {
   // Programaciones (global con filtros, o por parcela)
   app.get("/api/riego/programaciones", async (req, res) => {
     try {
-      res.json(await listarProgramaciones({ parcelaId: idPositivo(req.query.parcela_id), usuarioId: idPositivo(req.query.usuario_id) }));
+      res.json(await listarProgramaciones({ parcelaId: idPositivo(req.query.parcela_id), usuario: req.usuario }));
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: "Error al consultar las programaciones" });
@@ -406,7 +400,7 @@ function registrarRutas(app) {
   app.get("/api/parcelas/:parcelaId/riego/programaciones", async (req, res) => {
     try {
       const parcelaId = idPositivo(req.params.parcelaId);
-      if (!(await puedeGestionarParcela(idPositivo(req.query.usuario_id), parcelaId))) return prohibido(res);
+      if (!(await puedeGestionarParcela(req.usuario, parcelaId))) return prohibido(res);
       res.json(await listarProgramaciones({ parcelaId }));
     } catch (err) {
       console.error(err);
@@ -418,7 +412,7 @@ function registrarRutas(app) {
     const { error, datos } = validarProgramacion(req.body);
     if (error) return res.status(400).json({ error });
     try {
-      if (!(await puedeGestionarParcela(idPositivo(req.body.usuario_id), datos.parcela_id))) return prohibido(res);
+      if (!(await puedeGestionarParcela(req.usuario, datos.parcela_id))) return prohibido(res);
       const [result] = await pool.query(
         `INSERT INTO riego_programaciones (parcela_id, nombre, dias_semana, hora_inicio, duracion_minutos, activa)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -438,10 +432,9 @@ function registrarRutas(app) {
     try {
       const [actual] = await pool.query("SELECT parcela_id FROM riego_programaciones WHERE id = ?", [req.params.id]);
       if (actual.length === 0) return res.status(404).json({ error: "Programación no encontrada" });
-      const usuarioId = idPositivo(req.body.usuario_id);
       const permitido =
-        (await puedeGestionarParcela(usuarioId, actual[0].parcela_id)) &&
-        (await puedeGestionarParcela(usuarioId, datos.parcela_id));
+        (await puedeGestionarParcela(req.usuario, actual[0].parcela_id)) &&
+        (await puedeGestionarParcela(req.usuario, datos.parcela_id));
       if (!permitido) return prohibido(res);
       await pool.query(
         `UPDATE riego_programaciones
@@ -462,7 +455,7 @@ function registrarRutas(app) {
     try {
       const [actual] = await pool.query("SELECT parcela_id FROM riego_programaciones WHERE id = ?", [req.params.id]);
       if (actual.length === 0) return res.status(404).json({ error: "Programación no encontrada" });
-      if (!(await puedeGestionarParcela(idPositivo(req.body.usuario_id), actual[0].parcela_id))) return prohibido(res);
+      if (!(await puedeGestionarParcela(req.usuario, actual[0].parcela_id))) return prohibido(res);
       const activa = aBool(req.body.activa);
       await pool.query("UPDATE riego_programaciones SET activa = ? WHERE id = ?", [activa, req.params.id]);
       res.json({ id: Number(req.params.id), activa });
@@ -476,7 +469,7 @@ function registrarRutas(app) {
     try {
       const [actual] = await pool.query("SELECT parcela_id FROM riego_programaciones WHERE id = ?", [req.params.id]);
       if (actual.length === 0) return res.status(404).json({ error: "Programación no encontrada" });
-      if (!(await puedeGestionarParcela(idPositivo(req.query.usuario_id), actual[0].parcela_id))) return prohibido(res);
+      if (!(await puedeGestionarParcela(req.usuario, actual[0].parcela_id))) return prohibido(res);
       // los riegos ya registrados quedan en la bitácora (programacion_id pasa a NULL)
       await pool.query("DELETE FROM riego_programaciones WHERE id = ?", [req.params.id]);
       res.json({ ok: true });
@@ -493,7 +486,7 @@ function registrarRutas(app) {
     if (!parcelaId) return res.status(400).json({ error: "Parcela inválida" });
     if (!duracion) return res.status(400).json({ error: `La duración debe ser un número entero de 1 a ${DURACION_MAX} minutos` });
     try {
-      if (!(await puedeGestionarParcela(idPositivo(req.body.usuario_id), parcelaId))) return prohibido(res);
+      if (!(await puedeGestionarParcela(req.usuario, parcelaId))) return prohibido(res);
       let ahora;
       try {
         ahora = (await reloj.ahora()).fecha;
@@ -515,7 +508,7 @@ function registrarRutas(app) {
     const parcelaId = idPositivo(req.params.parcelaId);
     if (!parcelaId) return res.status(400).json({ error: "Parcela inválida" });
     try {
-      if (!(await puedeGestionarParcela(idPositivo(req.body.usuario_id), parcelaId))) return prohibido(res);
+      if (!(await puedeGestionarParcela(req.usuario, parcelaId))) return prohibido(res);
       let ahora;
       try {
         ahora = reloj.aSql((await reloj.ahora()).fecha);
@@ -541,7 +534,7 @@ function registrarRutas(app) {
     const parcelaId = idPositivo(req.params.parcelaId);
     if (!parcelaId) return res.status(400).json({ error: "Parcela inválida" });
     try {
-      if (!(await puedeGestionarParcela(idPositivo(req.body.usuario_id), parcelaId))) return prohibido(res);
+      if (!(await puedeGestionarParcela(req.usuario, parcelaId))) return prohibido(res);
       const activo = aBool(req.body.activo);
       const [result] = await pool.query("UPDATE parcelas SET riego_automatico = ? WHERE id = ?", [activo, parcelaId]);
       if (result.affectedRows === 0) return res.status(404).json({ error: "Parcela no encontrada" });
@@ -563,7 +556,7 @@ function registrarRutas(app) {
           hasta: req.query.hasta,
           estado: req.query.estado,
           origen: req.query.origen,
-          usuarioId: idPositivo(req.query.usuario_id),
+          usuario: req.usuario,
           limite: req.query.limit,
         })
       );
@@ -576,7 +569,7 @@ function registrarRutas(app) {
   // Riegos en curso (lo consulta el simulador en cada vuelta)
   app.get("/api/riego/activos", async (req, res) => {
     try {
-      res.json(await listarEventos({ estado: "en_curso", usuarioId: idPositivo(req.query.usuario_id), limite: 500 }));
+      res.json(await listarEventos({ estado: "en_curso", usuario: req.usuario, limite: 500 }));
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: "Error al consultar los riegos en curso" });
@@ -587,7 +580,7 @@ function registrarRutas(app) {
   app.get("/api/parcelas/:parcelaId/riego", async (req, res) => {
     try {
       const parcelaId = idPositivo(req.params.parcelaId);
-      if (!(await puedeGestionarParcela(idPositivo(req.query.usuario_id), parcelaId))) return prohibido(res);
+      if (!(await puedeGestionarParcela(req.usuario, parcelaId))) return prohibido(res);
       const [parcelas] = await pool.query("SELECT riego_automatico FROM parcelas WHERE id = ?", [parcelaId]);
       if (parcelas.length === 0) return res.status(404).json({ error: "Parcela no encontrada" });
       const [enCurso, programaciones, eventos, ahora] = await Promise.all([

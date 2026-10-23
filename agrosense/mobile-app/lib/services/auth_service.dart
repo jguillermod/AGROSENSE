@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
 import '../models/models.dart';
+import 'api_client.dart';
 import 'api_exception.dart';
 
 /// Resultado de una operación de autenticación: si falló, [error] trae
@@ -127,20 +128,22 @@ class AuthService {
   // --- Gestión de usuarios (solo admin) ---
 
   Future<List<Usuario>> getUsuarios() async {
-    final res = await http.get(Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios'));
     _checkOk(res, 'No se pudieron cargar los usuarios');
     final List<dynamic> data = jsonDecode(res.body);
     return data.map((e) => Usuario.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<Usuario> getUsuario(int id) async {
-    final res = await http.get(Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios/$id'));
+    final res = await ApiClient.get(Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios/$id'));
     _checkOk(res, 'No se pudo cargar el usuario');
     return Usuario.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   /// A diferencia de [register], permite elegir el rol: la usa la
   /// pantalla de Usuarios (solo admin) para crear otros administradores.
+  /// Por eso va con el JWT: auth-service exige ser admin para crear roles
+  /// distintos de agricultor.
   /// Devuelve el id creado (el propio backend ya lo entrega en la
   /// respuesta del registro, no hace falta un segundo viaje a buscarlo).
   Future<int> crearUsuario({
@@ -149,7 +152,7 @@ class AuthService {
     required String password,
     required String rol,
   }) async {
-    final res = await http.post(
+    final res = await ApiClient.post(
       Uri.parse('${ApiConfig.authBaseUrl}/api/auth/register'),
       headers: _jsonHeaders,
       body: jsonEncode({'nombre': nombre, 'email': email, 'password': password, 'rol': rol}),
@@ -168,7 +171,7 @@ class AuthService {
     required String rol,
     String? password,
   }) async {
-    final res = await http.put(
+    final res = await ApiClient.put(
       Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios/$id'),
       headers: _jsonHeaders,
       body: jsonEncode({'nombre': nombre, 'email': email, 'rol': rol, 'password': password}),
@@ -177,14 +180,14 @@ class AuthService {
   }
 
   Future<void> eliminarUsuario(int id) async {
-    final res = await http.delete(Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios/$id'));
+    final res = await ApiClient.delete(Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios/$id'));
     _checkOk(res, 'No se pudo eliminar el usuario');
   }
 
   // --- Perfil propio (correo, contraseña, foto por separado) ---
 
   Future<void> actualizarCorreo({required int id, required String email, required String passwordActual}) async {
-    final res = await http.put(
+    final res = await ApiClient.put(
       Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios/$id/perfil'),
       headers: _jsonHeaders,
       body: jsonEncode({'email': email, 'password_actual': passwordActual}),
@@ -197,7 +200,7 @@ class AuthService {
     required String passwordActual,
     required String passwordNueva,
   }) async {
-    final res = await http.put(
+    final res = await ApiClient.put(
       Uri.parse('${ApiConfig.authBaseUrl}/api/auth/usuarios/$id/perfil'),
       headers: _jsonHeaders,
       body: jsonEncode({'password_actual': passwordActual, 'password_nueva': passwordNueva}),
@@ -206,7 +209,7 @@ class AuthService {
   }
 
   /// Sube la foto al panel web (que es quien guarda y sirve los
-  /// archivos) autenticándose con el token guardado, como Bearer.
+  /// archivos) autenticándose con el token guardado, como Bearer (ApiClient).
   ///
   /// [mimeType] es el que reporta el selector nativo de image_picker
   /// (XFile.mimeType) cuando está disponible: es más confiable que
@@ -215,12 +218,10 @@ class AuthService {
   /// backend (que valida el mimetype) rechaza la subida con "Formato de
   /// imagen no soportado" aunque la foto sea válida.
   Future<String> actualizarFoto(File archivo, {String? mimeType, String? nombreArchivo}) async {
-    final token = await getToken();
     final request = http.MultipartRequest(
       'POST',
       Uri.parse('${ApiConfig.webAdminBaseUrl}/api/perfil/foto'),
     )
-      ..headers['Authorization'] = 'Bearer $token'
       ..files.add(await http.MultipartFile.fromPath(
         'foto',
         archivo.path,
@@ -228,8 +229,7 @@ class AuthService {
         contentType: _resolverContentType(mimeType, nombreArchivo ?? archivo.path),
       ));
 
-    final streamed = await request.send();
-    final res = await http.Response.fromStream(streamed);
+    final res = await ApiClient.send(request);
 
     _checkOk(res, 'No se pudo actualizar la foto');
     final data = jsonDecode(res.body) as Map<String, dynamic>;
