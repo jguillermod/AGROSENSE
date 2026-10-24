@@ -107,7 +107,7 @@
             <% } else { %>
               Sin eventos de riesgo en las próximas 24 h.
             <% } %>
-            <span class="cell-sub">Horas del reloj de la simulación.</span>
+            <span class="cell-sub">Hora de Guatemala.</span>
           </p>
         <% } %>
       </div>
@@ -147,7 +147,8 @@
     new Chart(document.getElementById('chart-humedad'), {
       type: 'line',
       data: {
-        labels: dias.map(d => new Date(d).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })),
+        // los días ya son de Guatemala (reportes del ETL): se muestran sin convertir de zona
+        labels: dias.map(d => new Date(String(d).slice(0, 10) + 'T12:00:00Z').toLocaleDateString('es-ES', { timeZone: 'UTC', day: '2-digit', month: 'short' })),
         datasets,
       },
       options: {

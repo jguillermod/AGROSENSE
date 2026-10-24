@@ -9,21 +9,31 @@ Microservicios (Node.js), ETL (Python), app móvil (Flutter) y sitio web adminis
 agrosense/
 ├── docker-compose.yml          # Ambiente de DESARROLLO
 ├── docker-compose.test.yml     # Ambiente de PRUEBAS (aislado, otros puertos/DB)
+├── docker-compose.prod.yml     # PRODUCCIÓN: dominio + HTTPS con Caddy (guía en DEPLOY.md)
+├── caddy/Caddyfile             # Proxy inverso de producción (único punto de entrada)
 ├── .env.example                # Plantilla de variables de entorno
 ├── services/
 │   ├── auth-service/           # Login, registro, usuarios (Node/Express)
 │   ├── fincas-service/         # Fincas, parcelas, estaciones (Node/Express)
 │   ├── lecturas-service/       # Recibe datos del ESP32, alertas (sensor y clima), historial (Node/Express)
-│   ├── simulator-service/      # Simula sensores y clima: datos demo, lecturas, /clima, /reloj (Node/Express)
+│   ├── simulator-service/      # Estaciones: lecturas cada 30-60 s, clima por finca, /reloj (Node/Express)
 │   ├── backup-service/         # Respaldos de la base con mariadb-dump (Node/Express)
 │   └── etl-service/            # Resúmenes diarios (Python + pandas)
 ├── web-admin/                  # Sitio web administrativo (Node + EJS)
 ├── mobile-app/                 # App Flutter (agricultor)
 ├── db/init.sql                 # Schema inicial de la base de datos
 ├── db/migrations/              # Cambios de schema para bases que ya existen (ver abajo)
+├── scripts/datos-iniciales.js  # Carga los datos iniciales (usuarios, fincas, 14 días de historial)
 ├── k8s/                        # Manifiestos de Kubernetes (fase de despliegue)
 └── docs/                       # Diagramas UML, manual de usuario, etc.
 ```
+
+## Publicar en un servidor (producción)
+
+Ver **[DEPLOY.md](DEPLOY.md)**: `docker-compose.prod.yml` publica solo Caddy (80/443) con HTTPS automático
+en `DOMINIO`; el panel web queda en `https://DOMINIO` y las APIs de la app en `/api/auth`, `/api/fincas` y
+`/api/lecturas` (Caddy quita el prefijo antes de reenviar). La app se compila con
+`--dart-define=API_BASE_URL=https://DOMINIO`.
 
 ## Cómo levantar el ambiente de DESARROLLO local
 
@@ -46,7 +56,7 @@ agrosense/
 | auth-service | 3001 | 4001 | Login, usuarios |
 | fincas-service | 3002 | 4002 | Fincas, parcelas, sensores, cultivos, riego (incluye el motor de riego) |
 | lecturas-service | 3003 | 4003 | Lecturas, alertas, clima (`/api/clima`) |
-| simulator-service | 3004 | 4004 | Simulador de sensores y clima |
+| simulator-service | 3004 | 4004 | Estaciones (lecturas automáticas) y clima por finca |
 | backup-service | 3005 | 4005 | Respaldos |
 | MariaDB | 3307 | 3316 | Base de datos |
 | phpMyAdmin | 8081 | — | Administrar la base |
@@ -66,6 +76,7 @@ uno ya aplicado no hace daño):
 | `002_riego.sql` | Programaciones y bitácora de riego, `parcelas.riego_automatico` |
 | `003_alertas_clima.sql` | Ciclo de vida de alertas (activa/atendida/resuelta, severidad, categoría sensor/climática), `parcelas.temperatura_min` (heladas), riegos "omitidos" |
 | `004_login_seguridad.sql` | Bloqueo de cuenta (`usuarios.intentos_fallidos`, `usuarios.bloqueado_hasta`) y tabla `password_resets` para recuperar la contraseña |
+| `005_cultivos_finca.sql` | Cultivos por finca o por parcela: `cultivos.finca_id` (obligatorio, se rellena con la finca de la parcela) y `cultivos.parcela_id` opcional. Al borrar una parcela sus cultivos quedan en la finca; al borrar la finca, se borran |
 
 ```bash
 for m in db/migrations/0*.sql; do
@@ -76,23 +87,65 @@ done
 En el ambiente de pruebas es igual, con el contenedor `agrosense-mysql-test`. Cada migración nueva
 también se agrega a `db/init.sql`, para que una base vacía quede igual que una migrada.
 
-## Riego y reloj simulado
+## Hora real (Guatemala)
 
-El motor de riego vive en `fincas-service`: cada pocos segundos revisa las programaciones, cierra
-los riegos que terminaron y, en parcelas con riego automático, riega cuando la humedad baja del
-mínimo. Con `RIEGO_RELOJ=simulado` (por defecto) usa la hora del simulador (`GET :3004/reloj`), que
-avanza `SIM_TIME_SCALE` veces más rápido, así que un horario de las 06:00 se dispara en pocos minutos
-reales. Con `RIEGO_RELOJ=real` usa la hora local de `APP_TIMEZONE`. Las horas de la bitácora de riego
-están en ese mismo reloj.
+Todo corre con la **hora real de Guatemala** (`APP_TIMEZONE=America/Guatemala`, UTC-6): lecturas, alertas,
+riegos, bitácora, clima y reportes. La base guarda los `TIMESTAMP` en UTC y la web y la app los muestran
+en hora de Guatemala (la web fija esa zona aunque el navegador esté en otra); las horas de riego son
+"de pared" en hora de Guatemala. Ninguna fecha queda adelantada.
 
-## Simulación (sin sensores reales)
+El motor de riego vive en `fincas-service`: cada 60 s revisa las programaciones, cierra los riegos que
+terminaron y, en parcelas con riego automático, riega cuando la humedad baja del mínimo. Por defecto
+`RIEGO_RELOJ=real`. Solo para ensayar a mano: `RIEGO_RELOJ=simulado` + `SIM_TIME_SCALE` > 1 aceleran el reloj.
 
-`simulator-service` arranca solo con `docker compose up`. La primera vez crea una
-**Finca Demo (Simulador)** con 3 parcelas (umbrales distintos) y 2 estaciones `SIM-*`
-por parcela, vinculadas con el mismo flujo de token/api_key que un sensor físico.
-No toca fincas, parcelas ni estaciones reales. Luego envía una lectura por estación
-cada `SIM_INTERVAL_SECONDS` (humedad con evaporación y riegos, temperatura con ciclo
-día/noche acelerado por `SIM_TIME_SCALE`, humedad ambiental inversa a la temperatura).
+## Datos iniciales
+
+`scripts/datos-iniciales.js` deja la base lista para usar con datos coherentes: borra los datos de
+operación (usuarios no administradores, fincas, parcelas, estaciones, lecturas, alertas, cultivos, riego,
+reportes y registros de campo; **los administradores no se tocan** ni cambia la estructura) y carga:
+
+- Un agricultor (dueño de las fincas) y una agrónoma (con 5 parcelas asignadas), con correos `@agrosense.com.gt`.
+  Sus contraseñas se generan al azar en cada corrida (16 caracteres, mayúsculas, minúsculas, números y
+  símbolos), se registran con auth-service (que guarda solo el hash) y **se muestran una sola vez en la
+  salida**: anótalas en un lugar seguro, no se guardan en ningún archivo.
+- 3 fincas (Patzicía, Barberena y Asunción Mita) con 3-4 parcelas cada una, una estación `AGS-…` por parcela,
+  umbrales según el cultivo, programaciones de riego y cultivos de la zona (maíz, frijol, café, tomate, chile,
+  hortalizas) por parcela y de toda la finca.
+- 14 días de historial cada 5 minutos con el mismo modelo que las estaciones en vivo (ciclo día/noche,
+  lluvias de tarde): riegos programados, automáticos, manuales y omitidos por lluvia, alertas resueltas
+  (algunas atendidas) y dos vigentes, y registros de campo.
+
+Es repetible: cada corrida deja la base igual (con contraseñas nuevas). Se corre con el servicio de
+estaciones detenido:
+
+```bash
+docker compose stop simulator-service
+docker compose run --rm --no-deps -T simulator-service node - --confirmar < scripts/datos-iniciales.js
+docker compose exec etl-service python etl.py --dias 15 --una-vez   # reportes diarios del historial
+docker compose start simulator-service
+```
+
+Sin `--confirmar` solo explica qué hace; con `--simular` calcula el historial y muestra un resumen sin tocar la base.
+
+## Servicio de estaciones (`simulator-service`)
+
+Mientras no haya sensores físicos, este servicio hace de las estaciones `AGS-…` (`ESTACIONES_PREFIJO`):
+cada 30 a 60 s envía una lectura por estación a `POST /api/lecturas`, con la misma `x-api-key` que usaría un
+ESP32. Un sensor físico se registra con otro código y nunca se toca. El modelo (`src/modelo.js`):
+temperatura con ciclo día/noche según la finca (más fresca en Patzicía, cálida en Asunción Mita), humedad
+ambiental inversa a la temperatura y humedad del suelo que baja por evaporación y sube con los riegos del
+motor y con la lluvia.
+
+**Todo su estado sale de la base**, no guarda archivos:
+
+- **Llaves**: en la base solo queda el hash de la `api_key`. Al arrancar, y cada vez que lecturas-service
+  rechaza una (p. ej. después de restaurar un respaldo), genera llaves nuevas, registra su hash y las
+  guarda solo en memoria.
+- **Continuidad**: cada estación sigue desde su última lectura guardada y el clima de cada finca se deduce
+  de sus lecturas de los últimos días.
+- **Relleno de huecos**: si el servicio estuvo detenido (o se restauró un respaldo horas o días después),
+  al arrancar rellena el hueco entre la última lectura y ahora con lecturas cada 5 minutos, hasta
+  `RELLENO_MAX_DIAS` (7).
 
 Control (exige el JWT de un admin; cómo obtenerlo en [Seguridad](#seguridad)):
 
@@ -103,33 +156,34 @@ curl -H "$AUTH" -X POST http://localhost:3004/scenario -H "Content-Type: applica
 # escenarios: normal | sequia | ola_calor | exceso_lluvia
 curl -H "$AUTH" -X POST http://localhost:3004/pause
 curl -H "$AUTH" -X POST http://localhost:3004/resume
-curl -H "$AUTH" -X POST http://localhost:3004/speed -H "Content-Type: application/json" -d '{"intervalo":5}'
+curl -H "$AUTH" -X POST http://localhost:3004/speed -H "Content-Type: application/json" -d '{"intervalo":45}'
 ```
 
-Los escenarios llevan los valores poco a poco más allá de los umbrales de cada parcela,
-así que las alertas que aparecen son las que genera el lecturas-service de verdad.
+Los escenarios llevan los valores poco a poco más allá de los umbrales de cada parcela, así que las alertas
+que aparecen son las que genera el lecturas-service de verdad.
 
-### Clima simulado
+### Clima
 
-El simulador también tiene clima: estado actual, pronóstico de 24 h simuladas y eventos. Los eventos
-aleatorios (`SIM_CLIMA_ALEATORIO`, por defecto ~1 por día simulado) se anuncian con horas de
+Cada finca tiene su clima: estado actual, pronóstico de 24 h y eventos. Los eventos aleatorios
+(`SIM_CLIMA_ALEATORIO`, en promedio `SIM_CLIMA_EVENTOS_POR_DIA`=0.5 por finca y por día) son los del lugar:
+lluvias de tarde, heladas solo en fincas frías y olas de calor en las cálidas. Se anuncian con horas de
 anticipación, así primero aparecen en el pronóstico y después ocurren.
 
 ```bash
-curl -H "$AUTH" http://localhost:3004/clima          # ahora, pronóstico y eventos programados
-# Evento a mano (horas simuladas); "en_horas" es opcional, para verlo primero en el pronóstico
+curl -H "$AUTH" "http://localhost:3004/clima?finca_id=1"   # ahora, pronóstico y eventos de una finca
+# Evento a mano en todas las fincas, o en una con "finca_id"; "en_horas" es opcional (verlo antes en el pronóstico)
 curl -H "$AUTH" -X POST http://localhost:3004/clima/evento -H "Content-Type: application/json" \
-     -d '{"tipo":"helada","duracion_horas":3,"en_horas":4}'
+     -d '{"tipo":"helada","duracion_horas":3,"en_horas":4,"finca_id":1}'
 # tipos: lluvia | helada | ola_calor | viento
-curl -H "$AUTH" -X DELETE http://localhost:3004/clima/eventos   # cancela los eventos en curso y programados
+curl -H "$AUTH" -X DELETE http://localhost:3004/clima/eventos   # cancela los eventos (?finca_id= para una)
 curl -H "$AUTH" -X POST http://localhost:3004/clima/aleatorio -H "Content-Type: application/json" -d '{"activo":false}'
 ```
 
-Efecto en las lecturas: la lluvia sube la humedad (suelo y ambiente) y baja la temperatura, la helada
-la lleva bajo la `temperatura_min` de cada parcela, la ola de calor la sube sobre la máxima y el viento
-seca. lecturas-service revisa `/clima` cada `CLIMA_POLL_SECONDS` y abre alertas climáticas
-("Pronóstico de helada", "Lluvia intensa prevista: posponer riego", "Viento fuerte"…). Con lluvia en
-curso o prevista, el motor de riego omite los riegos automáticos y programados y lo anota en la bitácora.
+Efecto en las lecturas: la lluvia sube la humedad (suelo y ambiente) y baja la temperatura, la helada la
+lleva bajo la `temperatura_min` de las parcelas, la ola de calor la sube y el viento seca. lecturas-service
+revisa el clima de cada finca cada `CLIMA_POLL_SECONDS` y abre alertas climáticas ("Pronóstico de helada",
+"Lluvia intensa prevista: posponer riego", "Viento fuerte"…). Con lluvia en curso o prevista, el motor de
+riego omite los riegos automáticos y programados y lo anota en la bitácora.
 
 ### Alertas
 
@@ -152,14 +206,26 @@ también la cabecera `x-backup-token`; exporta esa variable en tu terminal sin p
 AUTH="Authorization: Bearer $TOKEN"; LLAVE="x-backup-token: $BACKUP_API_TOKEN"
 curl -H "$AUTH" -H "$LLAVE" -X POST http://localhost:3005/backups        # 1. respaldo manual
 curl -H "$AUTH" -H "$LLAVE" http://localhost:3005/backups                # 2. aparece en la lista
-curl -H "$AUTH" -H "$LLAVE" -o prueba.sql.gz http://localhost:3005/backups/<nombre>/descargar   # 3. descarga (no la subas al repo)
-# 4. borra algo de prueba (p. ej. un cultivo desde la web) y restaura:
+curl -H "$AUTH" -H "$LLAVE" -o respaldo.sql.gz http://localhost:3005/backups/<nombre>/descargar   # 3. descarga (no la subas al repo)
+# 4. borra un dato (p. ej. un cultivo desde la web) y restaura:
 curl -H "$AUTH" -H "$LLAVE" -X POST http://localhost:3005/backups/<nombre>/restaurar
 # 5. el dato vuelve. Antes de restaurar se crea un respaldo "seguridad" del estado anterior.
 ```
 
 Antes de restaurar se crea siempre un respaldo de seguridad. `BACKUP_API_TOKEN` es una segunda llave
 (web-admin la envía en `x-backup-token`), recomendada si el puerto 3005 queda accesible fuera de tu PC.
+
+### Restaurar en otro servidor
+
+Todos los datos viven en MariaDB (volumen `mysql_data`): sobreviven a `docker compose down`/`up` y a
+reinicios. Para llevarlos a otro servidor:
+
+1. Levanta AgroSense allá con su propio `.env` (`docker compose up -d --build`).
+2. Copia el `.sql.gz` al volumen de respaldos de ese servidor (`docker cp respaldo.sql.gz agrosense-backup:/backups/`)
+   y restáuralo desde **Respaldos** en la web (o con `POST /backups/<nombre>/restaurar`).
+3. Nada más: el servicio de estaciones detecta que sus llaves ya no valen, genera unas nuevas, rellena el
+   hueco desde la última lectura del respaldo (hasta 7 días) y sigue enviando lecturas. Los usuarios entran
+   con las mismas contraseñas de siempre.
 
 ## Seguridad
 
@@ -191,6 +257,34 @@ nunca de un `usuario_id` que mande el cliente.
 - Crear o eliminar parcelas y editar o eliminar una finca: su dueño o el admin. Asignar parcelas a otros
   usuarios: solo admin (un usuario solo puede auto-asignarse parcelas de sus propias fincas).
 
+### Inventario de cultivos (por finca o por parcela)
+
+(`services/fincas-service/src/cultivos.js`)
+
+Cada cultivo es de una **finca** (`finca_id`, obligatorio) y opcionalmente de una de sus **parcelas**
+(`parcela_id`). Sin parcela es un cultivo de **"Toda la finca"** (ocupa varias parcelas o la finca completa).
+La parcela, si viene, tiene que ser de esa finca (si no, **400** *"La parcela no pertenece a la finca
+seleccionada"*).
+
+| Endpoint | Qué hace |
+|---|---|
+| `GET /api/cultivos?finca_id=&parcela_id=&estado=` | Listado; `parcela_id=ninguna` trae solo los de toda la finca |
+| `GET /api/fincas/:id/cultivos` | Los de la finca completa y los de sus parcelas |
+| `GET /api/parcelas/:id/cultivos` | Los de una parcela |
+| `POST /api/cultivos`, `PUT /api/cultivos/:id`, `DELETE /api/cultivos/:id` | Crear, editar (también mover de ubicación) y borrar |
+
+Permisos: el **admin** todo; el **dueño de la finca** (agricultor) los de la finca completa y los de sus
+parcelas; el **agrónomo** solo los de sus parcelas asignadas: no ve los de toda la finca, y crearlos,
+editarlos o borrarlos responde **403**. Al borrar una parcela sus cultivos pasan a la finca
+(`parcela_id = NULL`); al borrar una finca se borran sus cultivos. Un cliente viejo que mande solo
+`parcela_id` sigue funcionando: la finca se toma de la parcela.
+
+En la web: **Cultivos** (filtros por finca y parcela, columna *Ubicación*, formulario con finca y parcela
+opcional) y, en **Parcelas**, la sección *Cultivos de la finca* y la columna *Cultivos* de cada parcela. En
+la app: la tarjeta *Cultivos de la finca* en Parcelas, *Inventario de cultivos* en el detalle de la parcela,
+y el inventario completo agrupado por finca desde la tarjeta *Cultivos activos* del dashboard (el agrónomo,
+también desde el ícono de *Mis parcelas*).
+
 ### Largo mínimo de contraseña
 
 Toda contraseña nueva debe tener **al menos 8 caracteres**: registro, alta y edición de usuarios, cambio de
@@ -215,7 +309,7 @@ siguen iniciando sesión (el login no revisa el largo); el mínimo aplica cuando
   con JWT de admin. Recuperar la contraseña también levanta el bloqueo.
 - Los tiempos se calculan con `NOW()` de la base, no con la hora de cada contenedor.
 
-### Recuperación de contraseña (simulada)
+### Recuperación de contraseña (sin servidor de correo)
 
 1. En la web, **"¿Olvidaste tu contraseña?"** en el login (`/olvide`). En la app, el botón del mismo nombre.
    Se pide el correo.
@@ -247,9 +341,9 @@ valiendo hasta que vence).
 Cuando un servicio llama a otro no hay usuario detrás, así que **nunca se reenvía el JWT de un usuario**: se
 envía `X-Service-Token: <SERVICE_TOKEN>` y quien lo recibe lo trata como rol `servicio` (equivale a admin).
 
-- simulator → fincas: preparar los datos demo y leer los riegos en curso.
-- fincas (motor de riego) → simulator `/reloj`.
-- lecturas → simulator `/clima` (solo si el proveedor es el simulador; a un `CLIMA_PROVIDER_URL` externo no se le envía).
+- simulator → fincas: leer los riegos en curso.
+- fincas (motor de riego) → simulator `/reloj` (solo con `RIEGO_RELOJ=simulado`).
+- lecturas → simulator `/clima` (solo si el proveedor es simulator-service; a un `CLIMA_PROVIDER_URL` externo no se le envía).
 - simulator → lecturas `POST /api/lecturas` sigue usando la `x-api-key` de cada estación, como un sensor real.
 
 ### Web y app
@@ -312,7 +406,7 @@ Uptime Kuma corre dentro de la red de Docker, así que usa los **nombres de serv
 | Auth | `http://auth-service:3000/health` | `http://auth-service-test:3000/health` |
 | Fincas | `http://fincas-service:3000/health` | `http://fincas-service-test:3000/health` |
 | Lecturas | `http://lecturas-service:3000/health` | `http://lecturas-service-test:3000/health` |
-| Simulador | `http://simulator-service:3000/health` | `http://simulator-service-test:3000/health` |
+| Estaciones | `http://simulator-service:3000/health` | `http://simulator-service-test:3000/health` |
 | Respaldos | `http://backup-service:3000/health` | `http://backup-service-test:3000/health` |
 | Panel web | `http://web-admin:3000/health` | `http://web-admin-test:3000/health` |
 
@@ -338,7 +432,7 @@ Sin el socket, revísalo a mano con `docker inspect --format '{{.State.Health.St
 1. Menú **Páginas de estado** (*Status Pages*) → **+ Nueva página de estado**.
 2. **Nombre**: `AgroSense`; **Slug**: `agrosense` → **Siguiente**.
 3. En el editor, **+ Agregar grupo**, por ejemplo:
-   - `Servicios`: Auth, Fincas, Lecturas, Simulador, Respaldos.
+   - `Servicios`: Auth, Fincas, Lecturas, Estaciones, Respaldos.
    - `Datos`: MariaDB, ETL.
    - `Interfaz`: Panel web.
 4. En cada grupo, usa **Agregar un monitor** para elegir los monitores creados arriba.

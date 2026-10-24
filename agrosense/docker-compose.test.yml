@@ -49,7 +49,7 @@ services:
     env_file: .env.test
     environment:
       <<: *jwt-env
-      # recuperación de contraseña simulada (ver README, Seguridad)
+      # recuperación de contraseña sin servidor de correo (ver README, Seguridad)
       DEV_SHOW_RESET_TOKEN: ${DEV_SHOW_RESET_TOKEN:-false}
       WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-http://localhost:8090}
     ports:
@@ -101,8 +101,6 @@ services:
         condition: service_started
       lecturas-service-test:
         condition: service_started
-    volumes:
-      - simulator_test_data:/data
 
   backup-service-test:
     build: ./services/backup-service
@@ -143,6 +141,5 @@ services:
 
 volumes:
   mysql_test_data:
-  simulator_test_data:
   backups_test_data:
   uptime_test_data:

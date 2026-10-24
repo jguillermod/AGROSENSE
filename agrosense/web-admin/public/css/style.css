@@ -295,14 +295,26 @@ a {
 
 /* --- Panel administrativo (sidebar + contenido) --- */
 
+/* El sidebar queda fijo a la altura de la ventana; solo se desplaza el
+   contenido de la derecha, que deja libre el ancho del sidebar. */
+:root {
+  --sidebar-ancho: 240px;
+}
+
 .app-shell {
   display: flex;
   min-height: 100vh;
 }
 
 .sidebar {
-  width: 240px;
-  flex-shrink: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 20; /* sobre el contenido, bajo los modales (50) */
+  width: var(--sidebar-ancho);
+  height: 100vh;
+  box-sizing: border-box;
   background: linear-gradient(180deg, #16290f, #1f3517);
   color: #c7d6bf;
   padding: 1.6rem 1.1rem;
@@ -319,6 +331,7 @@ a {
   color: #ffffff;
   margin-bottom: 2rem;
   padding: 0 0.4rem;
+  flex-shrink: 0;
 }
 
 .sidebar-brand i {
@@ -326,11 +339,18 @@ a {
   font-size: 1.3rem;
 }
 
+/* Si el menú no cabe (pantallas bajas), se desplaza solo él: la marca
+   arriba y el bloque del usuario abajo siempre quedan visibles. */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden; /* el desplazamiento al pasar el mouse no crea scroll horizontal */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 .sidebar-nav a {
@@ -377,6 +397,7 @@ a {
   padding-top: 1rem;
   margin-top: 1rem;
   font-size: 0.8rem;
+  flex-shrink: 0;
 }
 
 .sidebar-user {
@@ -435,6 +456,7 @@ a {
 .main-content {
   flex: 1;
   min-width: 0;
+  margin-left: var(--sidebar-ancho);
   padding: 2rem 2.5rem;
 }
 

@@ -28,6 +28,13 @@ const FINCAS_URL = process.env.FINCAS_SERVICE_URL;
 const LECTURAS_URL = process.env.LECTURAS_SERVICE_URL;
 const BACKUP_URL = process.env.BACKUP_SERVICE_URL || "http://backup-service:3000";
 const ZONA_HORARIA = process.env.APP_TIMEZONE || "America/Guatemala";
+// Todas las fechas visibles se muestran en esta zona (Guatemala), formateen en
+// el servidor (que corre en UTC) o en el navegador (que puede estar en otra)
+app.locals.zonaHoraria = ZONA_HORARIA;
+
+// Cookies de sesión: con HTTPS (producción, COOKIE_SECURE=true) solo viajan
+// cifradas; SameSite=Lax evita que otros sitios las manden en sus formularios.
+const OPCIONES_COOKIE = { secure: process.env.COOKIE_SECURE === "true", sameSite: "lax" };
 // backup-service puede exigir un token propio (BACKUP_API_TOKEN); el panel lo reenvía
 const backupApi = axios.create({
   baseURL: BACKUP_URL,
@@ -197,8 +204,8 @@ app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     const { data } = await axios.post(`${AUTH_URL}/api/auth/login`, { email, password });
-    res.cookie("token", data.token, { httpOnly: true });
-    res.cookie("usuario", JSON.stringify(data.usuario));
+    res.cookie("token", data.token, { ...OPCIONES_COOKIE, httpOnly: true });
+    res.cookie("usuario", JSON.stringify(data.usuario), OPCIONES_COOKIE);
     res.redirect("/dashboard");
   } catch (err) {
     // 423 = cuenta bloqueada por intentos fallidos: el mensaje trae el tiempo restante.
@@ -218,7 +225,7 @@ app.post("/olvide", async (req, res) => {
   const email = String(req.body.email || "").trim();
   try {
     const { data } = await axios.post(`${AUTH_URL}/api/auth/recuperar`, { email });
-    // dev_enlace solo llega con DEV_SHOW_RESET_TOKEN=true (simulación sin correo)
+    // dev_enlace solo llega con DEV_SHOW_RESET_TOKEN=true (sin servidor de correo)
     res.render("olvide", { error: null, mensaje: data.mensaje, devEnlace: data.dev_enlace || null, email });
   } catch (err) {
     const mensaje = err.response?.data?.error || "No se pudo procesar la solicitud";
@@ -342,15 +349,24 @@ app.post("/fincas/:id/eliminar", requireAuth, async (req, res) => {
   }
 });
 
+const ESTADOS_CULTIVO = { sembrado: "Sembrado", en_crecimiento: "En crecimiento", cosechado: "Cosechado" };
+const UNIDADES_CULTIVO = ["plantas", "kg", "quintales"];
+
 async function cargarParcelasView(fincaIdSolicitada, extra = {}) {
   const { data: fincas } = await axios.get(`${FINCAS_URL}/api/fincas`);
   const fincaActiva = fincas.find((f) => String(f.id) === String(fincaIdSolicitada)) || fincas[0];
   let parcelas = [];
+  let cultivos = [];
   if (fincaActiva) {
-    const { data } = await axios.get(`${FINCAS_URL}/api/fincas/${fincaActiva.id}/parcelas`);
-    parcelas = data;
+    const [resParcelas, resCultivos] = await Promise.all([
+      axios.get(`${FINCAS_URL}/api/fincas/${fincaActiva.id}/parcelas`),
+      // los cultivos son un extra de la página: si fallan, se muestra la finca igual
+      axios.get(`${FINCAS_URL}/api/fincas/${fincaActiva.id}/cultivos`).catch(() => ({ data: null })),
+    ]);
+    parcelas = resParcelas.data;
+    cultivos = resCultivos.data;
   }
-  return { active: "parcelas", fincas, fincaActiva, parcelas, error: null, ...extra };
+  return { active: "parcelas", fincas, fincaActiva, parcelas, cultivos, estadosCultivo: ESTADOS_CULTIVO, error: null, ...extra };
 }
 
 app.get("/parcelas", requireAuth, async (req, res) => {
@@ -358,7 +374,7 @@ app.get("/parcelas", requireAuth, async (req, res) => {
     res.render("parcelas", await cargarParcelasView(req.query.finca));
   } catch (err) {
     console.error(err.message);
-    res.render("parcelas", { active: "parcelas", fincas: [], fincaActiva: null, parcelas: [], error: null });
+    res.render("parcelas", { active: "parcelas", fincas: [], fincaActiva: null, parcelas: [], cultivos: [], estadosCultivo: ESTADOS_CULTIVO, error: null });
   }
 });
 
@@ -412,15 +428,13 @@ app.post("/parcelas/:id/eliminar", requireAuth, async (req, res) => {
 });
 
 // --- Inventario de cultivos ---
-// Admin y agricultor ven y gestionan los cultivos de todas las parcelas
-// (el mismo acceso que ya tienen sobre parcelas); el agrónomo solo los de
-// sus parcelas asignadas. Por eso se manda siempre el usuario_id: el
-// fincas-service aplica esa regla también al crear, editar y eliminar.
+// Cada cultivo es de una finca y, opcionalmente, de una de sus parcelas
+// (sin parcela = "Toda la finca"). fincas-service aplica los permisos con el
+// JWT: el dueño de la finca gestiona todo lo de ella; el agrónomo solo los
+// cultivos de sus parcelas asignadas (nunca los de la finca completa).
 
-const ESTADOS_CULTIVO = { sembrado: "Sembrado", en_crecimiento: "En crecimiento", cosechado: "Cosechado" };
-const UNIDADES_CULTIVO = ["plantas", "kg", "quintales"];
 const CAMPOS_CULTIVO = [
-  "parcela_id", "tipo", "variedad", "fecha_siembra", "fecha_cosecha_estimada", "cantidad", "unidad", "estado", "notas",
+  "finca_id", "parcela_id", "tipo", "variedad", "fecha_siembra", "fecha_cosecha_estimada", "cantidad", "unidad", "estado", "notas",
 ];
 
 async function parcelasDisponibles(usuario) {
@@ -444,18 +458,35 @@ function urlCultivos(filtros) {
   return query ? `/cultivos?${query}` : "/cultivos";
 }
 
+// Fincas donde el usuario puede registrar cultivos. "propia" = puede usar
+// "Toda la finca" (admin, o el dueño si no es agrónomo); en las demás hay
+// que elegir una de sus parcelas.
+async function fincasParaCultivos(usuario, parcelas) {
+  if (usuario.rol === "agronomo") {
+    const fincas = [];
+    parcelas.forEach((p) => {
+      if (!fincas.some((f) => f.id === p.finca_id)) fincas.push({ id: p.finca_id, nombre: p.finca_nombre, propia: false });
+    });
+    return fincas;
+  }
+  const { data } = await axios.get(`${FINCAS_URL}/api/fincas`);
+  return data.map((f) => ({
+    id: f.id,
+    nombre: f.nombre,
+    propia: usuario.rol === "admin" || String(f.usuario_id) === String(usuario.id),
+  }));
+}
+
 async function cargarCultivosView(usuario, filtros, extra = {}) {
   const parcelas = await parcelasDisponibles(usuario);
-  const params = { usuario_id: usuario.id };
+  const params = {};
   if (filtros.finca) params.finca_id = filtros.finca;
-  if (filtros.parcela) params.parcela_id = filtros.parcela;
+  if (filtros.parcela) params.parcela_id = filtros.parcela; // "ninguna" = solo los de toda la finca
   if (filtros.estado) params.estado = filtros.estado;
-  const { data: cultivos } = await axios.get(`${FINCAS_URL}/api/cultivos`, { params });
-
-  const fincas = [];
-  parcelas.forEach((p) => {
-    if (!fincas.some((f) => f.id === p.finca_id)) fincas.push({ id: p.finca_id, nombre: p.finca_nombre });
-  });
+  const [{ data: cultivos }, fincas] = await Promise.all([
+    axios.get(`${FINCAS_URL}/api/cultivos`, { params }),
+    fincasParaCultivos(usuario, parcelas),
+  ]);
 
   return {
     active: "cultivos",
@@ -472,8 +503,8 @@ async function cargarCultivosView(usuario, filtros, extra = {}) {
   };
 }
 
-function datosCultivo(body, usuarioId) {
-  const datos = { usuario_id: usuarioId };
+function datosCultivo(body) {
+  const datos = {};
   CAMPOS_CULTIVO.forEach((campo) => (datos[campo] = body[campo]));
   return datos;
 }
@@ -508,7 +539,7 @@ app.get("/cultivos", requireAuth, async (req, res) => {
 
 app.post("/cultivos", requireAuth, async (req, res) => {
   try {
-    await axios.post(`${FINCAS_URL}/api/cultivos`, datosCultivo(req.body, req.usuario.id));
+    await axios.post(`${FINCAS_URL}/api/cultivos`, datosCultivo(req.body));
     res.redirect(urlCultivos(filtrosCultivos({ finca: req.body.f_finca, parcela: req.body.f_parcela, estado: req.body.f_estado })));
   } catch (err) {
     await renderErrorCultivo(req, res, err, "No se pudo crear el cultivo");
@@ -517,7 +548,7 @@ app.post("/cultivos", requireAuth, async (req, res) => {
 
 app.post("/cultivos/:id/editar", requireAuth, async (req, res) => {
   try {
-    await axios.put(`${FINCAS_URL}/api/cultivos/${req.params.id}`, datosCultivo(req.body, req.usuario.id));
+    await axios.put(`${FINCAS_URL}/api/cultivos/${req.params.id}`, datosCultivo(req.body));
     res.redirect(urlCultivos(filtrosCultivos({ finca: req.body.f_finca, parcela: req.body.f_parcela, estado: req.body.f_estado })));
   } catch (err) {
     await renderErrorCultivo(req, res, err, "No se pudo editar el cultivo", req.params.id);
@@ -527,7 +558,7 @@ app.post("/cultivos/:id/editar", requireAuth, async (req, res) => {
 app.post("/cultivos/:id/eliminar", requireAuth, async (req, res) => {
   const filtros = filtrosCultivos({ finca: req.body.f_finca, parcela: req.body.f_parcela, estado: req.body.f_estado });
   try {
-    await axios.delete(`${FINCAS_URL}/api/cultivos/${req.params.id}`, { params: { usuario_id: req.usuario.id } });
+    await axios.delete(`${FINCAS_URL}/api/cultivos/${req.params.id}`);
     res.redirect(urlCultivos(filtros));
   } catch (err) {
     console.error(err.message);
@@ -1132,7 +1163,7 @@ const EXPORTACIONES = {
     },
     columnas: [
       ["finca", (c) => c.finca_nombre],
-      ["parcela", (c) => c.parcela_nombre],
+      ["parcela", (c) => c.parcela_nombre || "Toda la finca"],
       ["tipo", (c) => c.tipo],
       ["variedad", (c) => c.variedad],
       ["fecha_siembra", (c) => c.fecha_siembra],
@@ -1151,7 +1182,7 @@ const EXPORTACIONES = {
       });
       return { filas: r.data.slice().reverse(), truncado: r.data.length === limite ? String(limite) : null };
     },
-    // inicio/fin están en el reloj del motor de riego (simulado durante la demo)
+    // inicio/fin están en la hora local del motor de riego (Guatemala)
     columnas: [
       ["inicio", (e) => e.inicio],
       ["fin", (e) => e.fin],
@@ -1285,7 +1316,7 @@ async function renderConfiguracion(req, res, extra = {}) {
 
 function actualizarCookiePerfil(req, res, actualizado) {
   const perfilCookie = { ...JSON.parse(req.cookies.usuario || "{}"), ...actualizado };
-  res.cookie("usuario", JSON.stringify(perfilCookie));
+  res.cookie("usuario", JSON.stringify(perfilCookie), OPCIONES_COOKIE);
 }
 
 app.get("/configuracion", requireAuth, async (req, res) => {

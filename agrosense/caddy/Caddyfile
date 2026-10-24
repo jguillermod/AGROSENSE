@@ -1,0 +1,58 @@
+# Proxy inverso de AgroSense en producción (docker-compose.prod.yml).
+#
+# Es el único contenedor con puertos hacia afuera (80 y 443). Pide y renueva
+# solo el certificado HTTPS de {$DOMINIO} (Let's Encrypt) y redirige http → https.
+#
+#   https://DOMINIO/                  → web-admin (panel web; incluye /api/perfil/foto de la app)
+#   https://DOMINIO/api/auth/...      → auth-service
+#   https://DOMINIO/api/fincas/...    → fincas-service
+#   https://DOMINIO/api/lecturas/...  → lecturas-service
+#
+# Cada prefijo se quita antes de reenviar: la app pide
+# https://DOMINIO/api/fincas/api/parcelas y fincas-service recibe /api/parcelas.
+# Hace falta un prefijo por servicio porque fincas y lecturas comparten rutas
+# (/api/parcelas/..., /api/estaciones/...).
+#
+# backup-service, simulator-service (control y clima), MariaDB y el ETL no
+# tienen ruta aquí: solo se alcanzan por la red interna de Docker.
+
+{$DOMINIO} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+		-X-Powered-By
+	}
+
+	handle_path /api/auth/* {
+		reverse_proxy auth-service:3000
+	}
+	handle_path /api/fincas/* {
+		reverse_proxy fincas-service:3000
+	}
+	handle_path /api/lecturas/* {
+		reverse_proxy lecturas-service:3000
+	}
+	handle {
+		reverse_proxy web-admin:3000
+	}
+}
+
+# Uptime Kuma, solo si se define KUMA_DOMINIO (p. ej. estado.midominio.com, con
+# su propio registro DNS). docker-compose.prod.yml arma KUMA_SITIO (ese dominio,
+# o un nombre que no existe) y KUMA_PUBLICADO ("si" o vacío): sin KUMA_DOMINIO
+# este bloque responde 404 a todo y Kuma no se publica.
+{$KUMA_SITIO} {
+	@publicado expression `"{$KUMA_PUBLICADO}" == "si"`
+	handle @publicado {
+		header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		reverse_proxy uptime-kuma:3001
+	}
+	handle {
+		respond 404
+	}
+}

@@ -142,7 +142,7 @@
     // Fechas en la hora local del navegador
     document.querySelectorAll('[data-fecha]').forEach((el) => {
       const d = new Date(el.dataset.fecha);
-      if (!isNaN(d)) el.textContent = d.toLocaleString('es-GT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      if (!isNaN(d)) el.textContent = d.toLocaleString('es-GT', { timeZone: '<%= zonaHoraria %>', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
     });
 
     // Los filtros se aplican al instante; la parcela se limita a la finca elegida

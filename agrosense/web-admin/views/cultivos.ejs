@@ -16,6 +16,8 @@
     const formatoCantidad = (n) => Number(n).toLocaleString('es-GT', { maximumFractionDigits: 2 });
     const badgeEstado = { sembrado: 'badge--info', en_crecimiento: 'badge--success', cosechado: 'badge--neutral' };
     const hayFiltros = filtros.finca || filtros.parcela || filtros.estado;
+    // "Finca / Parcela", o "Finca / Toda la finca" si no es de una parcela
+    const ubicacion = (c) => `${c.finca_nombre} / ${c.parcela_nombre || 'Toda la finca'}`;
   %>
   <div class="app-shell">
     <%- include('partials/sidebar', { active, usuario: locals.usuario }) %>
@@ -29,7 +31,7 @@
           </p>
         </div>
         <div class="topbar-actions">
-          <button class="btn-primary" <%= parcelas.length ? '' : 'disabled' %> onclick="abrirNuevoCultivo()">
+          <button class="btn-primary" <%= fincas.length ? '' : 'disabled' %> onclick="abrirNuevoCultivo()">
             <i class="bi bi-plus-lg"></i> Nuevo cultivo
           </button>
         </div>
@@ -53,6 +55,9 @@
           <label for="filtro-parcela">Parcela</label>
           <select class="finca-select" name="parcela" id="filtro-parcela">
             <option value="">Todas</option>
+            <% if (!esAgronomo) { %>
+              <option value="ninguna" <%= filtros.parcela === 'ninguna' ? 'selected' : '' %>>Toda la finca</option>
+            <% } %>
             <% parcelas.forEach(p => { %>
               <option value="<%= p.id %>" data-finca="<%= p.finca_id %>" <%= String(p.id) === filtros.parcela ? 'selected' : '' %>><%= p.nombre %></option>
             <% }) %>
@@ -75,13 +80,13 @@
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>Cultivo</th><th>Parcela</th><th>Siembra</th><th>Cosecha estimada</th><th>Cantidad</th><th>Estado</th><th></th></tr>
+            <tr><th>Cultivo</th><th>Ubicación</th><th>Siembra</th><th>Cosecha estimada</th><th>Cantidad</th><th>Estado</th><th></th></tr>
           </thead>
           <tbody>
             <% if (cultivos.length === 0) { %>
               <tr><td colspan="7" class="data-table-empty">
-                <% if (parcelas.length === 0) { %>
-                  <%= esAgronomo ? 'Todavía no tienes parcelas asignadas. Pídele al administrador que te asigne una.' : 'Primero registra una parcela para poder agregar cultivos.' %>
+                <% if (fincas.length === 0) { %>
+                  <%= esAgronomo ? 'Todavía no tienes parcelas asignadas. Pídele al administrador que te asigne una.' : 'Primero registra una finca para poder agregar cultivos.' %>
                 <% } else if (hayFiltros) { %>
                   No hay cultivos con estos filtros.
                 <% } else { %>
@@ -95,7 +100,7 @@
                   <strong><%= c.tipo %></strong>
                   <% if (c.variedad) { %><div class="cell-sub"><%= c.variedad %></div><% } %>
                 </td>
-                <td><%= c.parcela_nombre %><div class="cell-sub"><%= c.finca_nombre %></div></td>
+                <td><%= ubicacion(c) %></td>
                 <td><%= formatoFecha(c.fecha_siembra) %></td>
                 <td>
                   <%= formatoFecha(c.fecha_cosecha_estimada) %>
@@ -114,7 +119,7 @@
                       <i class="bi bi-pencil-fill"></i> Editar
                     </button>
                     <form method="POST" action="/cultivos/<%= c.id %>/eliminar"
-                      onsubmit="return confirm('¿Eliminar el cultivo &quot;<%= c.tipo %><%= c.variedad ? ' ' + c.variedad : '' %>&quot; de <%= c.parcela_nombre %>? Esta acción no se puede deshacer.')">
+                      onsubmit="return confirm('¿Eliminar el cultivo &quot;<%= c.tipo %><%= c.variedad ? ' ' + c.variedad : '' %>&quot; de <%= ubicacion(c) %>? Esta acción no se puede deshacer.')">
                       <%- include('partials/filtros-cultivos', { filtros }) %>
                       <button type="submit" class="menu-item danger"><i class="bi bi-trash-fill"></i> Eliminar</button>
                     </form>
@@ -133,18 +138,26 @@
       <h3 id="cultivo-titulo"><i class="bi bi-flower1"></i> Nuevo cultivo</h3>
       <form method="POST" id="form-cultivo" action="/cultivos">
         <%- include('partials/filtros-cultivos', { filtros }) %>
-        <div class="form-field">
-          <label for="cultivo-parcela">Parcela</label>
-          <select name="parcela_id" id="cultivo-parcela" required>
-            <option value="" disabled selected>Selecciona una parcela</option>
-            <% fincas.forEach(f => { %>
-              <optgroup label="<%= f.nombre %>">
-                <% parcelas.filter(p => p.finca_id === f.id).forEach(p => { %>
-                  <option value="<%= p.id %>"><%= p.nombre %></option>
-                <% }) %>
-              </optgroup>
-            <% }) %>
-          </select>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="cultivo-finca">Finca</label>
+            <select name="finca_id" id="cultivo-finca" required>
+              <option value="" disabled selected>Selecciona una finca</option>
+              <% fincas.forEach(f => { %>
+                <option value="<%= f.id %>" data-propia="<%= f.propia ? '1' : '' %>"><%= f.nombre %></option>
+              <% }) %>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="cultivo-parcela">Parcela</label>
+            <select name="parcela_id" id="cultivo-parcela">
+              <option value="" id="cultivo-toda-finca">Toda la finca</option>
+              <% parcelas.forEach(p => { %>
+                <option value="<%= p.id %>" data-finca="<%= p.finca_id %>"><%= p.nombre %></option>
+              <% }) %>
+            </select>
+            <p class="form-field-hint" id="cultivo-parcela-ayuda">Opcional: déjalo en "Toda la finca" si el cultivo ocupa varias parcelas o la finca completa.</p>
+          </div>
         </div>
         <div class="form-row">
           <div class="form-field">
@@ -210,11 +223,12 @@
       });
     });
 
-    // "en N días" se calcula con la fecha local del navegador: en el
-    // servidor (UTC) ya es el día siguiente durante la tarde/noche en Guatemala.
+    // "en N días" se calcula con la fecha de Guatemala: en el servidor (UTC)
+    // ya es el día siguiente durante la tarde/noche.
     (function diasParaCosecha() {
-      const hoy = new Date();
-      const hoyUTC = Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+      // "hoy" en Guatemala, aunque el navegador esté en otra zona
+      const [ha, hm, hd] = new Date().toLocaleDateString('en-CA', { timeZone: '<%= zonaHoraria %>' }).split('-').map(Number);
+      const hoyUTC = Date.UTC(ha, hm - 1, hd);
       document.querySelectorAll('[data-cosecha]').forEach((el) => {
         const [a, m, d] = el.dataset.cosecha.split('-').map(Number);
         const dias = Math.round((Date.UTC(a, m - 1, d) - hoyUTC) / 86400000);
@@ -231,7 +245,7 @@
 
     function limitarParcelas() {
       [...filtroParcela.options].forEach((o) => {
-        if (!o.value) return;
+        if (!o.dataset.finca) return;
         o.hidden = filtroFinca.value !== '' && o.dataset.finca !== filtroFinca.value;
       });
     }
@@ -240,7 +254,7 @@
     filtroFinca.addEventListener('change', () => {
       // si la parcela elegida es de otra finca, se quita ese filtro
       const elegida = filtroParcela.selectedOptions[0];
-      if (filtroFinca.value && elegida && elegida.value && elegida.dataset.finca !== filtroFinca.value) {
+      if (filtroFinca.value && elegida && elegida.dataset.finca && elegida.dataset.finca !== filtroFinca.value) {
         filtroParcela.value = '';
       }
       formFiltros.submit();
@@ -252,6 +266,7 @@
     const modal = document.getElementById('modal-cultivo');
     const form = document.getElementById('form-cultivo');
     const campos = {
+      finca_id: document.getElementById('cultivo-finca'),
       parcela_id: document.getElementById('cultivo-parcela'),
       tipo: document.getElementById('cultivo-tipo'),
       variedad: document.getElementById('cultivo-variedad'),
@@ -272,6 +287,7 @@
       Object.entries(campos).forEach(([nombre, el]) => {
         el.value = datos[nombre] ?? '';
       });
+      ajustarParcelas();
       if (!campos.unidad.value) campos.unidad.value = 'plantas';
       if (!campos.estado.value) campos.estado.value = 'sembrado';
       if (datos.cantidad) campos.cantidad.value = Number(datos.cantidad);
@@ -280,10 +296,38 @@
       campos.tipo.focus();
     }
 
+    // La parcela es opcional y solo puede ser de la finca elegida. "Toda la
+    // finca" solo está disponible para el dueño (o el admin): el agrónomo
+    // y quien solo tiene parcelas asignadas en esa finca deben elegir una.
+    const opcionTodaFinca = document.getElementById('cultivo-toda-finca');
+    const ayudaParcela = document.getElementById('cultivo-parcela-ayuda');
+
+    function ajustarParcelas() {
+      const finca = campos.finca_id.value;
+      const propia = Boolean(campos.finca_id.selectedOptions[0]?.dataset.propia);
+      [...campos.parcela_id.options].forEach((o) => {
+        if (o === opcionTodaFinca) return;
+        o.hidden = o.disabled = o.dataset.finca !== finca;
+      });
+      opcionTodaFinca.hidden = opcionTodaFinca.disabled = !propia;
+      opcionTodaFinca.textContent = propia ? 'Toda la finca' : 'Selecciona una parcela';
+      campos.parcela_id.required = !propia;
+      ayudaParcela.hidden = !propia;
+      // si la parcela elegida ya no aplica, se vuelve a "Toda la finca" (o a elegir una)
+      const elegida = campos.parcela_id.selectedOptions[0];
+      if (!elegida || elegida.disabled) campos.parcela_id.value = '';
+    }
+    campos.finca_id.addEventListener('change', ajustarParcelas);
+
     function abrirNuevoCultivo() {
-      // Si la lista está filtrada por una parcela, se propone esa misma
-      const parcelaFiltrada = filtroParcela.value || '';
-      llenarFormulario({ parcela_id: parcelaFiltrada, fecha_siembra: new Date().toLocaleDateString('en-CA') }, null);
+      // Si la lista está filtrada, se propone esa misma finca y parcela
+      const parcelaFiltrada = filtroParcela.value === 'ninguna' ? '' : filtroParcela.value;
+      const fincaDeParcela = parcelaFiltrada ? filtroParcela.selectedOptions[0].dataset.finca : '';
+      llenarFormulario({
+        finca_id: filtroFinca.value || fincaDeParcela,
+        parcela_id: parcelaFiltrada,
+        fecha_siembra: new Date().toLocaleDateString('en-CA', { timeZone: '<%= zonaHoraria %>' }),
+      }, null);
     }
 
     function abrirEditarCultivo(btn) {

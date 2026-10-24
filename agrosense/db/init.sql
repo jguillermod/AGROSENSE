@@ -141,12 +141,15 @@ CREATE TABLE IF NOT EXISTS registros_manuales (
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
 );
 
--- Inventario de cultivos por parcela. Se borra junto con su parcela,
--- igual que registros_manuales y usuario_parcelas.
--- (Copia de db/migrations/001_cultivos.sql para bases que ya existían.)
+-- Inventario de cultivos de una finca o de una de sus parcelas.
+-- parcela_id NULL = cultivo "de la finca" (varias parcelas o la finca
+-- completa); si viene, es una parcela de esa finca (lo valida fincas-service).
+-- Al borrar la parcela el cultivo queda en la finca; al borrar la finca, se borra.
+-- (Copia de db/migrations/001_cultivos.sql + 005_cultivos_finca.sql.)
 CREATE TABLE IF NOT EXISTS cultivos (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    parcela_id INT NOT NULL,
+    finca_id INT NOT NULL,
+    parcela_id INT NULL,
     tipo VARCHAR(100) NOT NULL,
     variedad VARCHAR(100) NULL,
     fecha_siembra DATE NOT NULL,
@@ -156,14 +159,15 @@ CREATE TABLE IF NOT EXISTS cultivos (
     estado ENUM('sembrado', 'en_crecimiento', 'cosechado') NOT NULL DEFAULT 'sembrado',
     notas TEXT NULL,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE CASCADE,
+    CONSTRAINT fk_cultivos_finca FOREIGN KEY (finca_id) REFERENCES fincas(id) ON DELETE CASCADE,
+    CONSTRAINT fk_cultivos_parcela FOREIGN KEY (parcela_id) REFERENCES parcelas(id) ON DELETE SET NULL,
     INDEX idx_cultivos_estado (estado)
 );
 
 -- Programación de riego por parcela (copia de db/migrations/002_riego.sql).
 -- dias_semana: letras separadas por coma, L,M,X,J,V,S,D (X = miércoles).
 -- hora_inicio y duracion_minutos se interpretan con el reloj del motor de
--- riego (el simulado durante la demo, el real en producción).
+-- riego (la hora local de Guatemala).
 CREATE TABLE IF NOT EXISTS riego_programaciones (
     id INT AUTO_INCREMENT PRIMARY KEY,
     parcela_id INT NOT NULL,

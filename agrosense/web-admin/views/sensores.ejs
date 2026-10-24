@@ -70,7 +70,7 @@
                 <td><span class="badge <%= estadoBadge %>"><%= estadoLabel %></span></td>
                 <td><%= e.humedad_suelo != null ? Math.round(e.humedad_suelo) + '%' : '—' %></td>
                 <td><%= e.temperatura != null ? Math.round(e.temperatura) + '°C' : '—' %></td>
-                <td><%= e.ultima_lectura ? new Date(e.ultima_lectura).toLocaleString('es-ES') : 'Sin lecturas' %></td>
+                <td><%= e.ultima_lectura ? new Date(e.ultima_lectura).toLocaleString('es-ES', { timeZone: zonaHoraria }) : 'Sin lecturas' %></td>
                 <% if (usuario && usuario.rol === 'admin') { %>
                   <td class="row-actions">
                     <button class="menu-trigger" onclick="this.parentElement.classList.toggle('open')">
@@ -111,7 +111,7 @@
                   <td><%= t.finca_nombre %> · <%= t.parcela_nombre %></td>
                   <td><code><%= t.token.slice(0, 8) %>…</code></td>
                   <td><span class="badge <%= badgeToken %>"><%= t.estado %></span></td>
-                  <td><%= new Date(t.expira_en).toLocaleString('es-ES') %></td>
+                  <td><%= new Date(t.expira_en).toLocaleString('es-ES', { timeZone: zonaHoraria }) %></td>
                   <td class="data-table-link">
                     <% if (t.estado === 'pendiente') { %>
                       <form method="POST" action="/sensores/tokens/<%= t.id %>/revocar">

@@ -31,13 +31,13 @@
         <div>
           <h2>Programación de riego</h2>
           <p class="page-subtitle" id="riego-reloj">
-            <% if (reloj && reloj.modo === 'simulado') { %>
-              <i class="bi bi-clock-history"></i> Reloj de la simulación: <strong><%= relojTexto %></strong>
+            <% if (reloj && reloj.escala > 1) { %>
+              <i class="bi bi-clock-history"></i> Reloj acelerado: <strong><%= relojTexto %></strong>
               · x<%= reloj.escala %><%= reloj.pausado ? ' · en pausa' : '' %>
             <% } else if (reloj) { %>
-              <i class="bi bi-clock"></i> Hora local: <strong><%= relojTexto %></strong>
+              <i class="bi bi-clock"></i> Hora de Guatemala: <strong><%= relojTexto %></strong>
             <% } else { %>
-              <span class="text-alerta"><i class="bi bi-exclamation-triangle-fill"></i> El reloj de la simulación no responde: los riegos no avanzan hasta que vuelva el simulador.</span>
+              <span class="text-alerta"><i class="bi bi-exclamation-triangle-fill"></i> El reloj del motor de riego no responde: los riegos no avanzan hasta que vuelva.</span>
             <% } %>
           </p>
         </div>
@@ -258,7 +258,7 @@
             </tbody>
           </table>
         </div>
-        <p class="live-legend">Las horas son las del <%= reloj && reloj.modo === 'simulado' ? 'reloj de la simulación (avanza x' + reloj.escala + ')' : 'reloj del motor de riego' %>. Se muestran los últimos 100 riegos.</p>
+        <p class="live-legend">Las horas son las de Guatemala<%= reloj && reloj.escala > 1 ? ' (reloj acelerado x' + reloj.escala + ')' : '' %>. Se muestran los últimos 100 riegos.</p>
       </section>
     </main>
   </div>
@@ -312,7 +312,7 @@
           </div>
         </div>
         <p class="form-field-hint">
-          La hora y la duración siguen el reloj <%= reloj && reloj.modo === 'simulado' ? 'de la simulación (x' + reloj.escala + '): un riego de 30 min dura unos ' + Math.round(30 * 60 / reloj.escala) + ' segundos reales' : 'del motor de riego' %>.
+          La hora y la duración son las de Guatemala<%= reloj && reloj.escala > 1 ? ' (reloj acelerado x' + reloj.escala + ': un riego de 30 min dura unos ' + Math.round(30 * 60 / reloj.escala) + ' segundos reales)' : '' %>.
           Si a esa hora la parcela ya está regando, esa ejecución se omite.
         </p>
         <label class="checklist-item">

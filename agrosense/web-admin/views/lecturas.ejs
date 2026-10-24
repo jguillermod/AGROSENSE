@@ -108,8 +108,9 @@
     const escapar = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const num = (v) => (v === null || v === undefined ? null : Number(v));
     const fmt = (v, unidad) => (v === null ? '—' : v.toFixed(1) + unidad);
-    const hora = (fecha) => new Date(fecha).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const fechaHora = (fecha) => new Date(fecha).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const ZONA = '<%= zonaHoraria %>';
+    const hora = (fecha) => new Date(fecha).toLocaleTimeString('es-ES', { timeZone: ZONA, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const fechaHora = (fecha) => new Date(fecha).toLocaleString('es-ES', { timeZone: ZONA, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     // Restaura la selección desde la URL (?parcela=ID o ?finca=ID)
     (function restaurarFiltro() {

@@ -1,11 +1,9 @@
 // Reloj del motor de riego.
 //
-// - "simulado" (por defecto, AgroSense corre como simulación): la hora la da
-//   el simulator-service (GET /reloj), que avanza SIM_TIME_SCALE veces más
-//   rápido que la real; así las programaciones se disparan en pocos minutos
-//   reales durante la demo.
-// - "real": hora local en APP_TIMEZONE (por defecto America/Guatemala), para
-//   cuando haya sensores reales y no corra el simulador.
+// - "real" (por defecto): hora local en APP_TIMEZONE (America/Guatemala).
+// - "simulado" (RIEGO_RELOJ=simulado, solo para ensayar a mano): la hora la
+//   da el simulator-service (GET /reloj), que con SIM_TIME_SCALE > 1 avanza
+//   más rápido que la real para ver dispararse las programaciones en minutos.
 //
 // Las horas se manejan "de pared", sin zona horaria: un Date cuyos campos UTC
 // son la fecha/hora local. Así se comparan y se guardan tal cual en columnas
@@ -13,7 +11,7 @@
 
 const { cabeceraServicio } = require("./verificarJWT");
 
-const MODO = process.env.RIEGO_RELOJ === "real" ? "real" : "simulado";
+const MODO = process.env.RIEGO_RELOJ === "simulado" ? "simulado" : "real";
 const SIMULATOR_URL = process.env.SIMULATOR_SERVICE_URL || "http://simulator-service:3000";
 const ZONA = process.env.APP_TIMEZONE || "America/Guatemala";
 

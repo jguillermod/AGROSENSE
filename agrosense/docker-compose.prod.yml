@@ -1,0 +1,205 @@
+# Ambiente de PRODUCCIÓN (servidor con dominio y HTTPS). Guía: DEPLOY.md
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Diferencias con docker-compose.yml (desarrollo):
+# - Solo Caddy publica puertos (80 y 443). MariaDB, los microservicios, el ETL
+#   y Uptime Kuma se comunican por la red interna de Docker. Sin phpMyAdmin.
+# - Caddy (caddy/Caddyfile) sirve el panel web en DOMINIO con certificado
+#   automático, y las APIs de la app en /api/auth, /api/fincas y /api/lecturas.
+#   backup-service y el control de simulator-service no se exponen.
+# - El código va dentro de cada imagen (sin carpetas montadas) y corre con
+#   `npm start` (sin nodemon).
+# - Nombre de proyecto propio: sus volúmenes (agrosense-prod_*) nunca se
+#   mezclan con los de desarrollo aunque ambos estén en la misma máquina.
+
+name: agrosense-prod
+
+# Healthcheck común de los servicios Node (node:20-alpine trae el wget de busybox)
+x-node-healthcheck: &node-healthcheck
+  test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health > /dev/null || exit 1"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+
+# Secretos: se interpolan desde .env (nunca se escriben aquí) y el arranque
+# falla si falta alguno.
+x-jwt-env: &jwt-env
+  NODE_ENV: production
+  JWT_SECRET: ${JWT_SECRET:?Falta JWT_SECRET en .env}
+x-servicio-env: &servicio-env
+  NODE_ENV: production
+  JWT_SECRET: ${JWT_SECRET:?Falta JWT_SECRET en .env}
+  SERVICE_TOKEN: ${SERVICE_TOKEN:?Falta SERVICE_TOKEN en .env}
+
+services:
+  mysql:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Falta DB_ROOT_PASSWORD en .env}
+      MYSQL_DATABASE: ${DB_NAME:?Falta DB_NAME en .env}
+      MYSQL_USER: ${DB_USER:?Falta DB_USER en .env}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Falta DB_PASSWORD en .env}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # solo corre la primera vez, con el volumen vacío
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/3306' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  auth-service:
+    build: ./services/auth-service
+    command: ["npm", "start"]
+    restart: unless-stopped
+    healthcheck: *node-healthcheck
+    env_file: .env
+    environment:
+      <<: *jwt-env
+      # sin servidor de correo, el enlace de recuperación solo queda en los logs
+      DEV_SHOW_RESET_TOKEN: "false"
+      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-https://${DOMINIO}}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  fincas-service:
+    build: ./services/fincas-service
+    command: ["npm", "start"]
+    restart: unless-stopped
+    healthcheck: *node-healthcheck
+    env_file: .env
+    environment: *servicio-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  lecturas-service:
+    build: ./services/lecturas-service
+    command: ["npm", "start"]
+    restart: unless-stopped
+    healthcheck: *node-healthcheck
+    env_file: .env
+    environment: *servicio-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # Estaciones AGS-…: lecturas cada 30-60 s con la hora real, clima por finca y
+  # relleno de huecos al arrancar. Su API de control no se publica.
+  simulator-service:
+    build: ./services/simulator-service
+    command: ["npm", "start"]
+    restart: unless-stopped
+    healthcheck: *node-healthcheck
+    env_file: .env
+    environment: *servicio-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      fincas-service:
+        condition: service_started
+      lecturas-service:
+        condition: service_started
+
+  etl-service:
+    build: ./services/etl-service
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # Respaldos en su propio volumen. Solo se usa desde el panel web (admin) o
+  # con `docker compose exec`; nunca se publica.
+  backup-service:
+    build: ./services/backup-service
+    command: ["npm", "start"]
+    restart: unless-stopped
+    healthcheck: *node-healthcheck
+    env_file: .env
+    environment:
+      <<: *jwt-env
+      BACKUP_API_TOKEN: ${BACKUP_API_TOKEN:?Falta BACKUP_API_TOKEN en .env}
+    volumes:
+      - backups_data:/backups
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  web-admin:
+    build: ./web-admin
+    command: ["npm", "start"]
+    restart: unless-stopped
+    healthcheck: *node-healthcheck
+    env_file: .env
+    environment:
+      <<: *jwt-env
+      BACKUP_API_TOKEN: ${BACKUP_API_TOKEN:?Falta BACKUP_API_TOKEN en .env}
+      BACKUP_SERVICE_URL: http://backup-service:3000
+      # las cookies de sesión solo viajan por HTTPS
+      COOKIE_SECURE: "true"
+    volumes:
+      # fotos de perfil (web y app)
+      - uploads_data:/app/public/uploads
+    depends_on:
+      - auth-service
+      - fincas-service
+      - lecturas-service
+      - backup-service
+
+  # Monitoreo. Solo se publica (vía Caddy) si se define KUMA_DOMINIO.
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    volumes:
+      - uptime_data:/app/data
+
+  # Único punto de entrada desde internet
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMINIO: ${DOMINIO:?Falta DOMINIO en .env}
+      KUMA_SITIO: ${KUMA_DOMINIO:-http://kuma.no-configurado.invalid}
+      KUMA_PUBLICADO: ${KUMA_DOMINIO:+si}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificados: no borrar (Let's Encrypt limita cuántos se piden)
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2019/config/ > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      - web-admin
+      - auth-service
+      - fincas-service
+      - lecturas-service
+
+volumes:
+  mysql_data:
+  backups_data:
+  uploads_data:
+  uptime_data:
+  caddy_data:
+  caddy_config:

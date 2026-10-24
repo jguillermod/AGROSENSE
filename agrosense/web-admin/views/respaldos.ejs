@@ -144,7 +144,7 @@
   <script>
     document.querySelectorAll('[data-fecha]').forEach((el) => {
       const d = new Date(el.dataset.fecha);
-      if (!isNaN(d)) el.textContent = d.toLocaleString('es-GT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      if (!isNaN(d)) el.textContent = d.toLocaleString('es-GT', { timeZone: '<%= zonaHoraria %>', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     });
 
     const confirmacion = document.getElementById('restaurar-confirmacion');
@@ -170,7 +170,7 @@
       lecturas: 'Una fila por lectura de sensor (hora local). Máximo 50,000 filas por archivo: si hay más, acota el rango de fechas; el nombre del archivo avisa si quedó recortado.',
       alertas: 'Alertas de sensores y de clima con su estado, quién las atendió y cuándo se resolvieron. El rango se aplica a la fecha de inicio.',
       cultivos: 'Inventario de cultivos. El rango de fechas se aplica a la fecha de siembra.',
-      riego: 'Bitácora de riego (programados, manuales, automáticos y omitidos). Las horas son las del reloj del motor de riego (simulado durante la demo).',
+      riego: 'Bitácora de riego (programados, manuales, automáticos y omitidos). Las horas son las de Guatemala.',
     };
     const tipo = document.getElementById('exp-tipo');
     const ayuda = document.getElementById('exp-ayuda');

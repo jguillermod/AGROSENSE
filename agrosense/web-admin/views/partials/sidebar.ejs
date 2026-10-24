@@ -51,6 +51,9 @@
   </div>
 </aside>
 <script>
+  // En pantallas bajas el menú tiene su propio scroll: que se vea la opción de la página actual
+  document.querySelector('.sidebar-nav a.active')?.scrollIntoView({ block: 'nearest' });
+
   // Insignia de alertas activas (sin atender) en el menú; se refresca cada 30 s
   (function () {
     const insignia = document.getElementById('insignia-alertas');

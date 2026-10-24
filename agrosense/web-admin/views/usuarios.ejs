@@ -44,7 +44,7 @@
                   <% } %>
                 </td>
                 <td><%= (parcelasPorUsuario[u.id] || []).join(', ') || '—' %></td>
-                <td><%= new Date(u.creado_en).toLocaleDateString('es-ES') %></td>
+                <td><%= new Date(u.creado_en).toLocaleDateString('es-ES', { timeZone: zonaHoraria }) %></td>
                 <td class="row-actions">
                   <button class="menu-trigger" onclick="this.parentElement.classList.toggle('open')">
                     <i class="bi bi-three-dots-vertical"></i>

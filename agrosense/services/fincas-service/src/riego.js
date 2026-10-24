@@ -1,10 +1,9 @@
 // Programación de riego: CRUD de programaciones, riego manual, riego
 // automático por humedad, bitácora y el motor que los ejecuta.
 //
-// El motor vive aquí (y no en el simulador) porque es lógica de negocio sobre
-// datos de este servicio y tiene que funcionar igual con sensores reales; el
-// simulador solo aporta la hora acelerada (ver reloj.js) y reacciona a los
-// riegos en curso subiendo la humedad.
+// El motor vive aquí porque es lógica de negocio sobre datos de este servicio
+// y funciona igual con cualquier sensor: usa la hora real de Guatemala (ver
+// reloj.js) y las estaciones reaccionan a los riegos en curso subiendo la humedad.
 
 const pool = require("./db");
 const reloj = require("./reloj");
@@ -22,10 +21,9 @@ const ALERTAS_LLUVIA = ["Lluvia en curso: riego pospuesto", "Lluvia intensa prev
 
 // Duración (en minutos del reloj del motor) de cada riego automático
 const AUTO_DURACION = Number(process.env.RIEGO_AUTO_DURACION_MINUTOS) || 60;
-// Cada cuánto revisa el motor. Con el reloj simulado a x144, revisar cada
-// minuto real serían 2.4 h simuladas por vuelta y un riego de 30 min empezaría
-// y terminaría entre dos revisiones; por eso por defecto son 5 s (12 min
-// simulados). Con el reloj real basta con 60 s.
+// Cada cuánto revisa el motor: con el reloj real basta con 60 s. Con el reloj
+// acelerado (RIEGO_RELOJ=simulado) son 5 s, para que un riego corto no empiece
+// y termine entre dos revisiones.
 const TICK_MS = (Number(process.env.RIEGO_TICK_SECONDS) || (reloj.MODO === "real" ? 60 : 5)) * 1000;
 // Lecturas más viejas que esto no cuentan para el riego automático
 const LECTURAS_RECIENTES_MIN = 10;
@@ -107,7 +105,7 @@ function formatearProgramacion(prog, ahora) {
   return { ...prog, activa, proxima_ejecucion: proxima ? reloj.aSql(proxima).slice(0, 16) : null };
 }
 
-// Hora del motor sin romper la respuesta si el simulador no contesta
+// Hora del motor sin romper la respuesta si el reloj no contesta
 async function ahoraOpcional() {
   try {
     return (await reloj.ahora()).fecha;
@@ -338,7 +336,7 @@ async function tickMotor() {
   try {
     const { fecha: ahora } = await reloj.ahora();
     if (ultimaHora && ahora < ultimaHora) {
-      // El reloj retrocedió (p. ej. se reinició el simulador sin su estado):
+      // El reloj retrocedió (p. ej. se cambió la hora del servidor):
       // los riegos abiertos ya no se podrían cerrar, así que se cancelan.
       const [result] = await pool.query(
         `UPDATE riego_eventos
@@ -357,7 +355,7 @@ async function tickMotor() {
     ultimaHora = ahora;
     await ejecutarRiegoAutomatico(ahora);
   } catch (err) {
-    // sin inundar el log si el simulador está apagado
+    // sin inundar el log si el reloj no responde
     if (Date.now() - ultimoErrorLog > 60000) {
       console.error(`[riego] Motor en espera: ${err.message}`);
       ultimoErrorLog = Date.now();
@@ -383,7 +381,7 @@ function registrarRutas(app) {
       const r = await reloj.ahora();
       res.json({ modo: r.modo, fecha_hora: reloj.aSql(r.fecha), escala: r.escala, pausado: r.pausado });
     } catch (err) {
-      res.status(503).json({ error: `El reloj de la simulación no responde (${err.message})` });
+      res.status(503).json({ error: `El reloj del motor de riego no responde (${err.message})` });
     }
   });
 
@@ -491,7 +489,7 @@ function registrarRutas(app) {
       try {
         ahora = (await reloj.ahora()).fecha;
       } catch (err) {
-        return res.status(503).json({ error: "El reloj de la simulación no responde; revisa que el simulador esté corriendo" });
+        return res.status(503).json({ error: "El reloj del motor de riego no responde; intenta de nuevo en unos segundos" });
       }
       const r = await abrirRiego({ parcelaId, origen: "manual", inicio: ahora, duracion });
       if (r.error) return res.status(r.status).json({ error: r.error });
@@ -513,7 +511,7 @@ function registrarRutas(app) {
       try {
         ahora = reloj.aSql((await reloj.ahora()).fecha);
       } catch (err) {
-        return res.status(503).json({ error: "El reloj de la simulación no responde; revisa que el simulador esté corriendo" });
+        return res.status(503).json({ error: "El reloj del motor de riego no responde; intenta de nuevo en unos segundos" });
       }
       const [result] = await pool.query(
         `UPDATE riego_eventos
@@ -566,7 +564,7 @@ function registrarRutas(app) {
     }
   });
 
-  // Riegos en curso (lo consulta el simulador en cada vuelta)
+  // Riegos en curso (lo consulta el servicio de estaciones en cada vuelta)
   app.get("/api/riego/activos", async (req, res) => {
     try {
       res.json(await listarEventos({ estado: "en_curso", usuario: req.usuario, limite: 500 }));

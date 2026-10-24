@@ -68,7 +68,7 @@ services:
     env_file: .env
     environment:
       <<: *jwt-env
-      # recuperación de contraseña simulada (ver README, Seguridad)
+      # recuperación de contraseña sin servidor de correo (ver README, Seguridad)
       DEV_SHOW_RESET_TOKEN: ${DEV_SHOW_RESET_TOKEN:-false}
       WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-http://localhost:8080}
     ports:
@@ -118,7 +118,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # en desarrollo, resúmenes cada 5 min para que la gráfica del dashboard avance durante la demo
+      # resúmenes cada 5 min para que la gráfica del dashboard avance durante el día
       ETL_INTERVAL_MINUTES: "5"
       # que los print() del ETL aparezcan al momento en `docker logs`
       PYTHONUNBUFFERED: "1"
@@ -136,7 +136,9 @@ services:
     volumes:
       - ./services/etl-service:/app
 
-  # Simula los sensores (ESP32): crea datos demo y envía lecturas periódicas
+  # Servicio de estaciones: envía las lecturas de las estaciones AGS- (como un ESP32)
+  # cada 30-60 s con la hora real, da el clima de cada finca y rellena huecos al arrancar.
+  # Todo su estado sale de la base: no guarda archivos.
   simulator-service:
     build: ./services/simulator-service
     healthcheck: *node-healthcheck
@@ -156,7 +158,6 @@ services:
     volumes:
       - ./services/simulator-service:/app
       - /app/node_modules
-      - simulator_data:/data
 
   # Respaldos de la base (mariadb-dump) en su propio volumen, fuera del repo
   backup-service:
@@ -207,6 +208,5 @@ services:
 
 volumes:
   mysql_data:
-  simulator_data:
   backups_data:
   uptime_data:

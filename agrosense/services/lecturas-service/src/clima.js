@@ -1,18 +1,20 @@
 // Alertas climáticas a partir del clima actual y del pronóstico.
 //
-// Cada CLIMA_POLL_SECONDS consulta al proveedor de clima (durante la demo, el
-// simulator-service con GET /clima; en producción se cambiaría por una API
-// meteorológica con la misma forma de respuesta) y, para cada parcela de la
-// finca a la que corresponde ese clima, abre o resuelve alertas climáticas
-// con el mismo mecanismo de "una vigente por tipo" que las de sensor.
+// Cada CLIMA_POLL_SECONDS consulta al proveedor de clima (por defecto el
+// simulator-service con GET /clima, que da el clima de cada finca; se puede
+// cambiar por una API meteorológica con la misma forma de respuesta en
+// CLIMA_PROVIDER_URL) y, para cada parcela de cada finca, abre o resuelve
+// alertas climáticas con el mismo mecanismo de "una vigente por tipo" que las
+// de sensor.
 //
-// El riesgo se decide aquí y no en el simulador: el simulador solo hace de
-// "mundo" (qué clima hay y cuál viene); qué es un riesgo para cada parcela
-// (p. ej. bajar de SU temperatura mínima) es regla de AgroSense.
+// El riesgo se decide aquí y no en el proveedor: el proveedor solo dice qué
+// clima hay y cuál viene; qué es un riesgo para cada parcela (p. ej. bajar de
+// SU temperatura mínima) es regla de AgroSense.
 
 const pool = require("./db");
 const { abrirOActualizar, resolver } = require("./alertas");
 const { cabeceraServicio } = require("./verificarJWT");
+const { filtroFincas } = require("./permisos");
 
 const PROVEEDOR_URL = process.env.CLIMA_PROVIDER_URL || process.env.SIMULATOR_SERVICE_URL || "http://simulator-service:3000";
 // El token interno solo viaja al simulador; nunca a un proveedor externo (CLIMA_PROVIDER_URL)
@@ -33,7 +35,7 @@ const CLIMA = {
 const LLUVIA_INTENSA_MM = 2; // mm/h
 const VIENTO_FUERTE_KMH = 50;
 
-let ultimo = null; // { datos, recibido_en } para GET /api/clima
+const ultimos = new Map(); // finca_id -> { datos, recibido_en } para GET /api/clima
 let ultimoErrorLog = 0;
 
 const hora = (fechaHora) => String(fechaHora).slice(11, 16);
@@ -111,23 +113,40 @@ function evaluarParcela(parcela, clima) {
   ];
 }
 
+async function pedirClima(fincaId) {
+  const url = fincaId ? `${PROVEEDOR_URL}/clima?finca_id=${fincaId}` : `${PROVEEDOR_URL}/clima`;
+  const res = await fetch(url, { headers: CABECERAS_PROVEEDOR, signal: AbortSignal.timeout(4000) });
+  if (!res.ok) throw new Error(`el proveedor de clima respondió ${res.status}`);
+  return res.json();
+}
+
+// Pide el clima de cada finca que informa el proveedor (en "fincas"; un
+// proveedor con una sola finca la manda en "finca") y evalúa sus parcelas
 async function revisar() {
-  let clima;
   try {
-    const res = await fetch(`${PROVEEDOR_URL}/clima`, { headers: CABECERAS_PROVEEDOR, signal: AbortSignal.timeout(4000) });
-    if (!res.ok) throw new Error(`el proveedor de clima respondió ${res.status}`);
-    clima = await res.json();
+    const primero = await pedirClima();
+    const fincas = Array.isArray(primero.fincas) && primero.fincas.length ? primero.fincas : [primero.finca].filter(Boolean);
+    const vigentes = new Set();
+    for (const finca of fincas) {
+      if (!finca || !finca.id) continue;
+      const clima = primero.finca && primero.finca.id === finca.id ? primero : await pedirClima(finca.id);
+      if (!clima.finca || !Array.isArray(clima.pronostico)) continue;
+      ultimos.set(finca.id, { datos: clima, recibido_en: new Date().toISOString() });
+      vigentes.add(finca.id);
+      await evaluarFinca(clima);
+    }
+    // fincas que ya no informa el proveedor (borradas o sin estaciones)
+    for (const id of ultimos.keys()) if (!vigentes.has(id)) ultimos.delete(id);
   } catch (err) {
     // sin datos de clima no se abre ni se resuelve nada (se conserva el estado)
     if (Date.now() - ultimoErrorLog > 60000) {
       console.error(`[clima] Sin datos de clima: ${err.message}`);
       ultimoErrorLog = Date.now();
     }
-    return;
   }
-  ultimo = { datos: clima, recibido_en: new Date().toISOString() };
-  if (!clima.finca || !clima.finca.id || !Array.isArray(clima.pronostico)) return;
+}
 
+async function evaluarFinca(clima) {
   const [parcelas] = await pool.query(
     "SELECT id, temperatura_min, temperatura_max FROM parcelas WHERE finca_id = ?",
     [clima.finca.id]
@@ -171,10 +190,22 @@ function iniciar() {
 }
 
 function registrarRutas(app) {
-  // Último clima recibido (para el dashboard web y la app)
-  app.get("/api/clima", (req, res) => {
-    if (!ultimo) return res.status(503).json({ error: "Todavía no hay datos de clima" });
-    res.json({ ...ultimo.datos, recibido_en: ultimo.recibido_en });
+  // Último clima recibido (para el dashboard web y la app): el de ?finca_id=
+  // si el usuario la puede ver, si no el de la primera de sus fincas
+  app.get("/api/clima", async (req, res) => {
+    try {
+      const filtro = filtroFincas(req.usuario, "id") || { sql: "TRUE", params: [] };
+      const [visibles] = await pool.query(`SELECT id FROM fincas WHERE ${filtro.sql} ORDER BY id`, filtro.params);
+      const ids = visibles.map((f) => f.id).filter((id) => ultimos.has(id));
+      const pedida = Number(req.query.finca_id);
+      const id = ids.includes(pedida) ? pedida : ids[0];
+      if (!id) return res.status(503).json({ error: "Todavía no hay datos de clima" });
+      const { datos, recibido_en } = ultimos.get(id);
+      res.json({ ...datos, fincas: undefined, recibido_en });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Error al consultar el clima" });
+    }
   });
 }
 

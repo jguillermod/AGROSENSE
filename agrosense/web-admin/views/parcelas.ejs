@@ -40,11 +40,11 @@
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>Parcela</th><th>Humedad</th><th>Temp.</th><th>Estado</th><th></th></tr>
+            <tr><th>Parcela</th><th>Humedad</th><th>Temp.</th><th>Estado</th><th>Cultivos</th><th></th></tr>
           </thead>
           <tbody>
             <% if (parcelas.length === 0) { %>
-              <tr><td colspan="5" class="data-table-empty">No hay parcelas registradas en esta finca.</td></tr>
+              <tr><td colspan="6" class="data-table-empty">No hay parcelas registradas en esta finca.</td></tr>
             <% } %>
             <% parcelas.forEach(p => {
               const badgeClass = {
@@ -61,6 +61,12 @@
                 <td><%= p.humedad_actual != null ? Math.round(p.humedad_actual) + '%' : '—' %></td>
                 <td><%= p.temperatura_actual != null ? Math.round(p.temperatura_actual) + '°C' : '—' %></td>
                 <td><span class="badge <%= badgeClass %>"><%= p.estado %></span></td>
+                <td>
+                  <% const activosParcela = (cultivos || []).filter(c => c.parcela_id === p.id && c.estado !== 'cosechado').length; %>
+                  <a href="/cultivos?finca=<%= fincaActiva.id %>&parcela=<%= p.id %>">
+                    <%= activosParcela %> <%= activosParcela === 1 ? 'activo' : 'activos' %>
+                  </a>
+                </td>
                 <td class="row-actions">
                   <button class="menu-trigger" onclick="this.parentElement.classList.toggle('open')">
                     <i class="bi bi-three-dots-vertical"></i>
@@ -86,6 +92,42 @@
           </tbody>
         </table>
       </div>
+
+      <% if (fincaActiva) {
+        const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+        const formatoFecha = (f) => { if (!f) return '—'; const [a, m, d] = f.split('-'); return `${d} ${MESES[Number(m) - 1]} ${a}`; };
+        const badgeCultivo = { sembrado: 'badge--info', en_crecimiento: 'badge--success', cosechado: 'badge--neutral' };
+      %>
+        <div class="page-topbar">
+          <h3 class="section-title">Cultivos de <%= fincaActiva.nombre %></h3>
+          <a class="btn-secondary" href="/cultivos?finca=<%= fincaActiva.id %>"><i class="bi bi-flower1"></i> Gestionar cultivos</a>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Cultivo</th><th>Ubicación</th><th>Siembra</th><th>Cantidad</th><th>Estado</th></tr>
+            </thead>
+            <tbody>
+              <% if (cultivos === null) { %>
+                <tr><td colspan="5" class="data-table-empty">No se pudieron cargar los cultivos de esta finca.</td></tr>
+              <% } else if (cultivos.length === 0) { %>
+                <tr><td colspan="5" class="data-table-empty">Esta finca todavía no tiene cultivos registrados.</td></tr>
+              <% } else { cultivos.forEach(c => { %>
+                <tr>
+                  <td>
+                    <strong><%= c.tipo %></strong>
+                    <% if (c.variedad) { %><div class="cell-sub"><%= c.variedad %></div><% } %>
+                  </td>
+                  <td><%= c.parcela_nombre || 'Toda la finca' %></td>
+                  <td><%= formatoFecha(c.fecha_siembra) %></td>
+                  <td><%= Number(c.cantidad).toLocaleString('es-GT', { maximumFractionDigits: 2 }) %> <%= c.unidad %></td>
+                  <td><span class="badge <%= badgeCultivo[c.estado] || 'badge--neutral' %>"><%= estadosCultivo[c.estado] || c.estado %></span></td>
+                </tr>
+              <% }) } %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
     </main>
   </div>
 

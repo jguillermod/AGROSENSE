@@ -15,6 +15,7 @@ const {
 } = require("./permisos");
 const { verificarJWTOServicio, soloAdmin } = require("./verificarJWT");
 const riego = require("./riego");
+const cultivos = require("./cultivos");
 
 const TOKEN_TTL_MINUTOS = 30;
 const hash = (valor) => crypto.createHash("sha256").update(valor).digest("hex");
@@ -106,7 +107,8 @@ app.put("/api/fincas/:id", async (req, res) => {
 });
 
 // Elimina una finca: se bloquea si todavía tiene parcelas (que a su vez
-// podrían tener sensores e historial dependiendo de ellas).
+// podrían tener sensores e historial dependiendo de ellas). Sus cultivos
+// (los que quedaron a nivel de finca) se borran con ella.
 app.delete("/api/fincas/:id", async (req, res) => {
   if (!(await puedeAdministrarFinca(req.usuario, req.params.id))) return prohibido(res, "Esta finca no es tuya");
   const [parcelas] = await pool.query("SELECT COUNT(*) AS total FROM parcelas WHERE finca_id = ?", [
@@ -115,9 +117,22 @@ app.delete("/api/fincas/:id", async (req, res) => {
   if (parcelas[0].total > 0) {
     return res.status(409).json({ error: "No se puede eliminar: la finca todavía tiene parcelas" });
   }
-  const [result] = await pool.query("DELETE FROM fincas WHERE id = ?", [req.params.id]);
-  if (result.affectedRows === 0) return res.status(404).json({ error: "Finca no encontrada" });
-  res.json({ ok: true });
+  // sus cultivos se van con ella (la llave también es ON DELETE CASCADE)
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query("DELETE FROM cultivos WHERE finca_id = ?", [req.params.id]);
+    const [result] = await conn.query("DELETE FROM fincas WHERE id = ?", [req.params.id]);
+    await conn.commit();
+    if (result.affectedRows === 0) return res.status(404).json({ error: "Finca no encontrada" });
+    res.json({ ok: true });
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ error: "Error al eliminar la finca" });
+  } finally {
+    conn.release();
+  }
 });
 
 // Calcula el estado de una parcela según sus umbrales y la última lectura recibida
@@ -186,6 +201,7 @@ app.put("/api/parcelas/:id", async (req, res) => {
 
 // Elimina una parcela: se bloquea si todavía tiene sensores vinculados,
 // para no perder en silencio el historial de lecturas que dependen de ellos.
+// Sus cultivos se conservan a nivel de finca.
 app.delete("/api/parcelas/:id", async (req, res) => {
   const [[parcela]] = await pool.query("SELECT finca_id FROM parcelas WHERE id = ?", [req.params.id]);
   if (!parcela) return res.status(404).json({ error: "Parcela no encontrada" });
@@ -203,6 +219,8 @@ app.delete("/api/parcelas/:id", async (req, res) => {
     await conn.query("DELETE FROM alertas WHERE parcela_id = ?", [req.params.id]);
     await conn.query("DELETE FROM reportes_diarios WHERE parcela_id = ?", [req.params.id]);
     await conn.query("DELETE FROM sensor_tokens WHERE parcela_id = ?", [req.params.id]);
+    // los cultivos no se pierden: quedan como cultivos de la finca
+    await conn.query("UPDATE cultivos SET parcela_id = NULL WHERE parcela_id = ?", [req.params.id]);
     const [result] = await conn.query("DELETE FROM parcelas WHERE id = ?", [req.params.id]);
     await conn.commit();
     if (result.affectedRows === 0) return res.status(404).json({ error: "Parcela no encontrada" });
@@ -341,6 +359,15 @@ app.get("/api/parcelas/:parcelaId/estaciones", async (req, res) => {
 // llega a manos de terceros por fuera del panel, y la api_key solo se
 // muestra una vez, igual que un password: en la base solo guardamos su hash.
 
+// Columnas de un token: POST y GET devuelven la misma forma (la app y la web
+// muestran finca, parcela, estado y expiración con el mismo modelo)
+const SQL_SENSOR_TOKEN = `
+  SELECT st.id, st.token, st.parcela_id, st.estado, st.creado_en, st.expira_en, st.usado_en,
+         p.nombre AS parcela_nombre, f.nombre AS finca_nombre
+  FROM sensor_tokens st
+  JOIN parcelas p ON p.id = st.parcela_id
+  JOIN fincas f ON f.id = p.finca_id`;
+
 // Genera/revoca tokens el admin o quien gestiona la parcela (la app deja al agrónomo vincular sensores)
 app.post("/api/sensores/tokens", async (req, res) => {
   const { parcela_id } = req.body;
@@ -355,7 +382,8 @@ app.post("/api/sensores/tokens", async (req, res) => {
       "INSERT INTO sensor_tokens (token, parcela_id, expira_en) VALUES (?, ?, ?)",
       [token, parcela_id, expiraEn]
     );
-    res.status(201).json({ id: result.insertId, token, parcela_id, expira_en: expiraEn });
+    const [[creado]] = await pool.query(`${SQL_SENSOR_TOKEN} WHERE st.id = ?`, [result.insertId]);
+    res.status(201).json(creado);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al generar el token" });
@@ -369,11 +397,7 @@ app.get("/api/sensores/tokens", async (req, res) => {
   // cada quien ve los de sus parcelas
   const filtro = filtroParcelas(req.usuario, "st.parcela_id") || { sql: "TRUE", params: [] };
   const [rows] = await pool.query(
-    `SELECT st.id, st.token, st.estado, st.creado_en, st.expira_en, st.usado_en,
-            p.nombre AS parcela_nombre, f.nombre AS finca_nombre
-     FROM sensor_tokens st
-     JOIN parcelas p ON p.id = st.parcela_id
-     JOIN fincas f ON f.id = p.finca_id
+    `${SQL_SENSOR_TOKEN}
      WHERE ${filtro.sql}
      ORDER BY st.creado_en DESC
      LIMIT 50`,
@@ -456,173 +480,8 @@ app.get("/api/estaciones", async (req, res) => {
   res.json(rows);
 });
 
-// --- Inventario de cultivos ---
-// Permisos: ver permisos.js (cada rol opera solo las parcelas que le tocan).
-
-const UNIDADES_CULTIVO = ["plantas", "kg", "quintales"];
-const ESTADOS_CULTIVO = ["sembrado", "en_crecimiento", "cosechado"];
-
-// Las fechas se devuelven como texto YYYY-MM-DD: un DATE convertido a Date
-// de JS llega como medianoche UTC y en el navegador/celular (UTC-6) se
-// mostraría como el día anterior.
-const SELECT_CULTIVOS = `
-  SELECT c.id, c.parcela_id, p.nombre AS parcela_nombre, p.finca_id, f.nombre AS finca_nombre,
-         c.tipo, c.variedad,
-         DATE_FORMAT(c.fecha_siembra, '%Y-%m-%d') AS fecha_siembra,
-         DATE_FORMAT(c.fecha_cosecha_estimada, '%Y-%m-%d') AS fecha_cosecha_estimada,
-         c.cantidad, c.unidad, c.estado, c.notas, c.creado_en
-  FROM cultivos c
-  JOIN parcelas p ON p.id = c.parcela_id
-  JOIN fincas f ON f.id = p.finca_id`;
-
-function fechaValida(valor) {
-  if (typeof valor !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
-  const fecha = new Date(`${valor}T00:00:00Z`);
-  return !Number.isNaN(fecha.getTime()) && fecha.toISOString().slice(0, 10) === valor;
-}
-
-// Devuelve { error } o { datos } con los campos ya normalizados
-function validarCultivo(body) {
-  const texto = (v) => (v === undefined || v === null ? "" : String(v).trim());
-  const datos = {
-    parcela_id: idPositivo(body.parcela_id),
-    tipo: texto(body.tipo),
-    variedad: texto(body.variedad) || null,
-    fecha_siembra: texto(body.fecha_siembra),
-    fecha_cosecha_estimada: texto(body.fecha_cosecha_estimada) || null,
-    cantidad: Number(body.cantidad),
-    unidad: texto(body.unidad) || "plantas",
-    estado: texto(body.estado) || "sembrado",
-    notas: texto(body.notas) || null,
-  };
-
-  if (!datos.parcela_id) return { error: "Selecciona una parcela" };
-  if (!datos.tipo) return { error: "El tipo de cultivo es obligatorio" };
-  if (datos.tipo.length > 100) return { error: "El tipo no puede superar 100 caracteres" };
-  if (datos.variedad && datos.variedad.length > 100) return { error: "La variedad no puede superar 100 caracteres" };
-  if (!fechaValida(datos.fecha_siembra)) return { error: "La fecha de siembra es obligatoria y debe ser válida" };
-  if (datos.fecha_cosecha_estimada) {
-    if (!fechaValida(datos.fecha_cosecha_estimada)) return { error: "La fecha de cosecha estimada no es válida" };
-    if (datos.fecha_cosecha_estimada < datos.fecha_siembra) {
-      return { error: "La fecha de cosecha estimada no puede ser anterior a la de siembra" };
-    }
-  }
-  if (texto(body.cantidad) === "" || !Number.isFinite(datos.cantidad) || datos.cantidad <= 0) {
-    return { error: "La cantidad es obligatoria y debe ser mayor que 0" };
-  }
-  if (datos.cantidad >= 1e8) return { error: "La cantidad es demasiado grande" };
-  if (!UNIDADES_CULTIVO.includes(datos.unidad)) return { error: `Unidad inválida (usa: ${UNIDADES_CULTIVO.join(", ")})` };
-  if (!ESTADOS_CULTIVO.includes(datos.estado)) return { error: `Estado inválido (usa: ${ESTADOS_CULTIVO.join(", ")})` };
-  return { datos };
-}
-
-// Listado con filtros opcionales: finca_id, parcela_id, estado (siempre dentro de las parcelas del usuario)
-app.get("/api/cultivos", async (req, res) => {
-  try {
-    const condiciones = [];
-    const params = [];
-    const fincaId = idPositivo(req.query.finca_id);
-    const parcelaId = idPositivo(req.query.parcela_id);
-    if (fincaId) {
-      condiciones.push("p.finca_id = ?");
-      params.push(fincaId);
-    }
-    if (parcelaId) {
-      condiciones.push("c.parcela_id = ?");
-      params.push(parcelaId);
-    }
-    if (ESTADOS_CULTIVO.includes(req.query.estado)) {
-      condiciones.push("c.estado = ?");
-      params.push(req.query.estado);
-    }
-    aplicarFiltro(filtroParcelas(req.usuario, "c.parcela_id"), condiciones, params);
-    const where = condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "";
-    const [rows] = await pool.query(
-      `${SELECT_CULTIVOS} ${where} ORDER BY f.nombre, p.nombre, c.fecha_siembra DESC, c.id DESC`,
-      params
-    );
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error al consultar los cultivos" });
-  }
-});
-
-app.get("/api/parcelas/:parcelaId/cultivos", async (req, res) => {
-  try {
-    const parcelaId = idPositivo(req.params.parcelaId);
-    if (!parcelaId) return res.status(400).json({ error: "Parcela inválida" });
-    if (!(await puedeGestionarParcela(req.usuario, parcelaId))) return prohibido(res);
-    const [rows] = await pool.query(
-      `${SELECT_CULTIVOS} WHERE c.parcela_id = ? ORDER BY c.fecha_siembra DESC, c.id DESC`,
-      [parcelaId]
-    );
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error al consultar los cultivos" });
-  }
-});
-
-app.post("/api/cultivos", async (req, res) => {
-  const { error, datos } = validarCultivo(req.body);
-  if (error) return res.status(400).json({ error });
-  try {
-    if (!(await puedeGestionarParcela(req.usuario, datos.parcela_id))) return prohibido(res);
-    const [result] = await pool.query(
-      `INSERT INTO cultivos (parcela_id, tipo, variedad, fecha_siembra, fecha_cosecha_estimada, cantidad, unidad, estado, notas)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [datos.parcela_id, datos.tipo, datos.variedad, datos.fecha_siembra, datos.fecha_cosecha_estimada,
-       datos.cantidad, datos.unidad, datos.estado, datos.notas]
-    );
-    res.status(201).json({ id: result.insertId, ...datos });
-  } catch (err) {
-    if (err.code === "ER_NO_REFERENCED_ROW_2") return res.status(400).json({ error: "La parcela no existe" });
-    console.error(err);
-    res.status(500).json({ error: "Error al crear el cultivo" });
-  }
-});
-
-app.put("/api/cultivos/:id", async (req, res) => {
-  const { error, datos } = validarCultivo(req.body);
-  if (error) return res.status(400).json({ error });
-  try {
-    const [actual] = await pool.query("SELECT parcela_id FROM cultivos WHERE id = ?", [req.params.id]);
-    if (actual.length === 0) return res.status(404).json({ error: "Cultivo no encontrado" });
-
-    // Si se mueve de parcela, hace falta permiso sobre la de origen y la de destino
-    const permitido =
-      (await puedeGestionarParcela(req.usuario, actual[0].parcela_id)) &&
-      (await puedeGestionarParcela(req.usuario, datos.parcela_id));
-    if (!permitido) return prohibido(res);
-
-    await pool.query(
-      `UPDATE cultivos SET parcela_id = ?, tipo = ?, variedad = ?, fecha_siembra = ?, fecha_cosecha_estimada = ?,
-              cantidad = ?, unidad = ?, estado = ?, notas = ?
-       WHERE id = ?`,
-      [datos.parcela_id, datos.tipo, datos.variedad, datos.fecha_siembra, datos.fecha_cosecha_estimada,
-       datos.cantidad, datos.unidad, datos.estado, datos.notas, req.params.id]
-    );
-    res.json({ id: Number(req.params.id), ...datos });
-  } catch (err) {
-    if (err.code === "ER_NO_REFERENCED_ROW_2") return res.status(400).json({ error: "La parcela no existe" });
-    console.error(err);
-    res.status(500).json({ error: "Error al editar el cultivo" });
-  }
-});
-
-app.delete("/api/cultivos/:id", async (req, res) => {
-  try {
-    const [actual] = await pool.query("SELECT parcela_id FROM cultivos WHERE id = ?", [req.params.id]);
-    if (actual.length === 0) return res.status(404).json({ error: "Cultivo no encontrado" });
-    if (!(await puedeGestionarParcela(req.usuario, actual[0].parcela_id))) return prohibido(res);
-    await pool.query("DELETE FROM cultivos WHERE id = ?", [req.params.id]);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error al eliminar el cultivo" });
-  }
-});
+// --- Inventario de cultivos (por finca o por parcela, ver cultivos.js) ---
+cultivos.registrarRutas(app);
 
 // --- Riego: programaciones, riego manual/automático, bitácora y motor ---
 riego.registrarRutas(app);
@@ -631,7 +490,9 @@ riego.registrarRutas(app);
 // Todo se limita a las parcelas que el usuario puede ver (el admin ve todo).
 app.get("/api/dashboard/resumen", async (req, res) => {
   const filtro = (columna) => filtroParcelas(req.usuario, columna) || { sql: "TRUE", params: [] };
-  const [est, ale, lec, cul, rie] = ["e.parcela_id", "a.parcela_id", "e.parcela_id", "c.parcela_id", "r.parcela_id"].map(filtro);
+  const [est, ale, lec, rie] = ["e.parcela_id", "a.parcela_id", "e.parcela_id", "r.parcela_id"].map(filtro);
+  // cultivos: los de parcela y, para el dueño, también los de la finca completa
+  const cul = cultivos.filtroCultivos(req.usuario) || { sql: "TRUE", params: [] };
   const [[resumen]] = await pool.query(
     `SELECT
        (SELECT COUNT(*) FROM estaciones e WHERE ${est.sql}) AS estaciones_activas,
