@@ -13,8 +13,8 @@ const _azulRiego = Color(0xFF1565C0);
 
 /// Sección de riego del detalle de parcela: estado actual (regando / en
 /// espera), "Regar ahora" / "Detener", interruptor de riego automático,
-/// próximas programaciones y últimos riegos. Se refresca sola cada 10 s,
-/// porque con el reloj simulado un riego dura pocos segundos reales.
+/// próximas programaciones y últimos riegos. Se refresca sola cada 10 s
+/// para ver empezar y terminar los riegos sin recargar.
 ///
 /// El agrónomo solo llega aquí desde sus parcelas asignadas y, además, el
 /// usuario_id viaja en cada petición: fincas-service rechaza las demás.
@@ -222,7 +222,7 @@ class RiegoSectionState extends State<RiegoSection> {
               Padding(
                 padding: const EdgeInsets.only(top: 6, bottom: 4),
                 child: Text(
-                  'Horas según el reloj del motor de riego (ahora: ${_formatoFecha.format(resumen.reloj!)})',
+                  'Hora de Guatemala (ahora: ${_formatoFecha.format(resumen.reloj!)})',
                   style: const TextStyle(fontSize: 11, color: AppTheme.neutralText),
                 ),
               ),

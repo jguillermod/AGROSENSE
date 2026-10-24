@@ -22,7 +22,7 @@ class AuthResult {
 
 /// Respuesta de "olvidé mi contraseña": [mensaje] es siempre el mismo
 /// (exista o no el correo); [devToken] solo llega si el backend tiene
-/// DEV_SHOW_RESET_TOKEN=true (simulación sin correo).
+/// DEV_SHOW_RESET_TOKEN=true (sin servidor de correo).
 class SolicitudRecuperacion {
   final String mensaje;
   final String? devToken;

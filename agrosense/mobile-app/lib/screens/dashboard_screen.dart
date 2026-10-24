@@ -249,7 +249,7 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-/// Clima actual y pronóstico de las próximas horas (reloj de la simulación).
+/// Clima actual y pronóstico de las próximas horas (hora de Guatemala).
 class _ClimaCard extends StatelessWidget {
   final Clima? clima;
   const _ClimaCard({required this.clima});

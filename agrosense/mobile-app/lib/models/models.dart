@@ -247,7 +247,7 @@ class AlertasConteo {
 }
 
 /// Una hora de clima (actual o del pronóstico). La hora viene "de pared" en
-/// el reloj de la simulación (sin zona horaria).
+/// la hora local de Guatemala (sin zona horaria).
 class ClimaHora {
   final DateTime fechaHora;
   final double temperatura;
@@ -614,7 +614,7 @@ class Cultivo {
 }
 
 /// Las horas de riego vienen "de pared" en el reloj del motor de riego
-/// (el simulado durante la demo), como texto "YYYY-MM-DD HH:MM[:SS]".
+/// (hora local de Guatemala), como texto "YYYY-MM-DD HH:MM[:SS]".
 DateTime? _fechaRiego(dynamic v) => jsonFecha(v);
 
 /// Un riego de la bitácora (en curso, completado o detenido).
@@ -706,7 +706,7 @@ class RiegoResumen {
   final List<RiegoProgramacion> programaciones;
   final List<RiegoEvento> ultimosRiegos;
 
-  /// Hora actual del motor de riego (null si el reloj del simulador no responde).
+  /// Hora actual del motor de riego (null si su reloj no responde).
   final DateTime? reloj;
 
   RiegoResumen({

@@ -8,7 +8,7 @@ import '../widgets/common.dart';
 /// luego definir la contraseña nueva con el código recibido (el mismo
 /// token del enlace de la web; es de un solo uso y vence en 30 minutos).
 ///
-/// Es una simulación: auth-service no envía correo, escribe el código en
+/// Sin servidor de correo: auth-service no envía correo, escribe el código en
 /// sus logs. Solo si el backend tiene DEV_SHOW_RESET_TOKEN=true el código
 /// llega en la respuesta y se precarga aquí.
 class RecuperarPasswordScreen extends StatefulWidget {
